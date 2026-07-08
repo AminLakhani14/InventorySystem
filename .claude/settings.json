@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node test-mongo.js)",
+      "Bash(git check-ignore *)",
+      "Bash(echo \"exit:$?\")",
+      "Bash(powershell -NoProfile -Command \"Get-Process -Id 21888 | Select-Object Id, ProcessName, StartTime, Path\")",
+      "Bash(powershell -NoProfile -Command \"Get-Process -Id 21888 | Select-Object Id,ProcessName,CommandLine\")",
+      "Bash(wmic process *)",
+      "Bash(ls -la \"C:/Project/itemHive/backend\" 2>&1 | head -30; echo \"---ENV---\"; cat \"C:/Project/itemHive/backend/.env\" 2>&1)",
+      "Read(//c/Project/itemHive/backend/**)",
+      "Bash(powershell -NoProfile -Command \"Get-CimInstance Win32_Process -Filter \\\\\"ProcessId=19060\\\\\" | Select-Object ProcessId, Name, CommandLine | Format-List\")",
+      "Bash(powershell -NoProfile -Command \"Stop-Process -Id 21888 -Force -ErrorAction SilentlyContinue; Stop-Process -Id 19060 -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 500; netstat -ano | Select-String ':5050|:5173'\")",
+      "Bash(powershell -NoProfile -Command \"Get-CimInstance Win32_Process -Filter \\\\\"ProcessId=16636\\\\\" | Select-Object ProcessId, Name, CommandLine | Format-List\")",
+      "Bash(npm run *)"
+    ]
+  }
+}
