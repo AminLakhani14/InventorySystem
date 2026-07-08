@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="420" height="120" viewBox="0 0 420 120" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="hiveGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4F46E5"/>
+      <stop offset="100%" stop-color="#06B6D4"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="420" height="120" fill="#FFFFFF"/>
+
+  <g transform="translate(20,20)">
+    <polygon points="40,0 80,23 80,67 40,90 0,67 0,23" fill="url(#hiveGradient)"/>
+    <line x1="40" y1="0" x2="40" y2="90" stroke="white" stroke-width="3"/>
+    <line x1="0" y1="23" x2="80" y2="67" stroke="white" stroke-width="3"/>
+    <line x1="80" y1="23" x2="0" y2="67" stroke="white" stroke-width="3"/>
+  </g>
+
+  <text x="130" y="70" font-family="Poppins, Arial, sans-serif" font-size="42" fill="#111827">
+    Item
+  </text>
+  <text x="230" y="70" font-family="Poppins, Arial, sans-serif" font-size="42" font-weight="600" fill="#2563EB">
+    Hive
+  </text>
+</svg>
