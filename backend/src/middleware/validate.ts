@@ -90,6 +90,8 @@ export const creditPaymentSchema = Joi.object({
     amount: Joi.number().positive().required(),
     paidVia: Joi.string().valid('cash', 'card').required(),
     notes: Joi.string().allow('').optional(),
+    paymentDate: Joi.date().optional(),
+    nextDueDate: Joi.date().allow(null).optional(),
 });
 
 export const customerSchema = Joi.object({

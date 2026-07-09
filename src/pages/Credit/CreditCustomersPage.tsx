@@ -23,7 +23,7 @@ import {
     TextField,
     Typography,
 } from '@mui/material';
-import { Search, WalletCards } from 'lucide-react';
+import { Printer, Search, WalletCards } from 'lucide-react';
 import api from '../../api/axios';
 import useAppCurrency from '../../hooks/useAppCurrency';
 import { useSelector } from 'react-redux';
@@ -41,7 +41,10 @@ interface CreditCustomer {
     outstandingAmount: number;
     lastSaleAt?: string | null;
     lastPaymentAt?: string | null;
+    nextDueDate?: string | null;
 }
+
+const todayDateInput = () => new Date().toISOString().split('T')[0];
 
 const CreditCustomersPage: React.FC = () => {
     const { formatCurrency, currencySymbol } = useAppCurrency();
@@ -53,6 +56,8 @@ const CreditCustomersPage: React.FC = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedCustomer, setSelectedCustomer] = useState<CreditCustomer | null>(null);
     const [paymentAmount, setPaymentAmount] = useState('');
+    const [paymentDate, setPaymentDate] = useState(todayDateInput());
+    const [nextDueDate, setNextDueDate] = useState('');
     const [paidVia, setPaidVia] = useState<'cash' | 'card'>('cash');
     const [notes, setNotes] = useState('');
     const [saving, setSaving] = useState(false);
@@ -82,11 +87,25 @@ const CreditCustomersPage: React.FC = () => {
             return customers;
         }
 
-        return customers.filter((customer) =>
-            customer.customerName.toLowerCase().includes(query) ||
-            customer.customerCnic.toLowerCase().includes(query)
-        );
+        return customers.filter((customer) => {
+            const haystack = [
+                customer.customerName,
+                customer.customerCnic,
+                String(customer.totalInvoices),
+                String(customer.totalCreditIssued),
+                String(customer.totalRecovered),
+                String(customer.outstandingAmount),
+                customer.lastSaleAt ? new Date(customer.lastSaleAt).toLocaleString() : '',
+            ]
+                .join(' ')
+                .toLowerCase();
+            return haystack.includes(query);
+        });
     }, [customers, searchTerm]);
+
+    const handlePrint = () => {
+        window.print();
+    };
 
     const totals = useMemo(() => filteredCustomers.reduce((acc, customer) => {
         acc.outstanding += customer.outstandingAmount;
@@ -98,6 +117,8 @@ const CreditCustomersPage: React.FC = () => {
     const handleOpenPayment = (customer: CreditCustomer) => {
         setSelectedCustomer(customer);
         setPaymentAmount(customer.outstandingAmount.toFixed(2));
+        setPaymentDate(todayDateInput());
+        setNextDueDate('');
         setPaidVia('cash');
         setNotes('');
     };
@@ -105,12 +126,24 @@ const CreditCustomersPage: React.FC = () => {
     const handleClosePayment = () => {
         setSelectedCustomer(null);
         setPaymentAmount('');
+        setPaymentDate(todayDateInput());
+        setNextDueDate('');
         setPaidVia('cash');
         setNotes('');
     };
 
+    const remainingAfterPayment = selectedCustomer
+        ? Math.max(selectedCustomer.outstandingAmount - Number(paymentAmount || 0), 0)
+        : 0;
+    const isPartialPayment = remainingAfterPayment > 0;
+
     const handleSubmitPayment = async () => {
         if (!selectedCustomer) {
+            return;
+        }
+
+        if (isPartialPayment && !nextDueDate) {
+            setError('Please select a due date for the remaining balance.');
             return;
         }
 
@@ -123,6 +156,8 @@ const CreditCustomersPage: React.FC = () => {
                 amount: Number(paymentAmount),
                 paidVia,
                 notes,
+                paymentDate,
+                nextDueDate: isPartialPayment ? nextDueDate : null,
             });
 
             const paidLabel = formatCurrency(Number(paymentAmount || 0), { minimumFractionDigits: 0, maximumFractionDigits: 2 });
@@ -182,12 +217,27 @@ const CreditCustomersPage: React.FC = () => {
                 </Grid>
             </Grid>
 
-            <Card sx={{ borderRadius: 4, overflow: 'hidden' }}>
+            <Card id="printable-credit-customers" sx={{ borderRadius: 4, overflow: 'hidden' }}>
                 <CardContent sx={{ p: 0 }}>
-                    <Box sx={{ p: 2.5, borderBottom: '1px solid', borderColor: 'divider' }}>
+                    <Box className="print-only" sx={{ display: 'none', p: 2.5 }}>
+                        <Typography variant="h5" fontWeight={900}>Credit Customers</Typography>
+                        <Typography variant="body2" color="text.secondary">
+                            Generated on {new Date().toLocaleString()}
+                        </Typography>
+                        <Stack direction="row" spacing={3} sx={{ mt: 1 }}>
+                            <Typography variant="body2">Customers with due: {totals.customers}</Typography>
+                            <Typography variant="body2">
+                                Outstanding: {formatCurrency(totals.outstanding, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                            </Typography>
+                            <Typography variant="body2">
+                                Recovered: {formatCurrency(totals.recovered, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                            </Typography>
+                        </Stack>
+                    </Box>
+
+                    <Box className="no-print" sx={{ p: 2.5, display: 'flex', gap: 1.5, alignItems: 'center', flexWrap: 'wrap', borderBottom: '1px solid', borderColor: 'divider' }}>
                         <TextField
-                            fullWidth
-                            placeholder={`Search by customer name or ${regionalIdLabel}...`}
+                            placeholder={`Search by customer, ${regionalIdLabel}, invoices, amount, date...`}
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                             InputProps={{
@@ -197,11 +247,20 @@ const CreditCustomersPage: React.FC = () => {
                                     </InputAdornment>
                                 ),
                             }}
+                            sx={{ flex: 1, minWidth: { xs: '100%', sm: 300 } }}
                         />
+                        <Button
+                            variant="outlined"
+                            startIcon={<Printer size={18} />}
+                            onClick={handlePrint}
+                            sx={{ fontWeight: 800 }}
+                        >
+                            Print
+                        </Button>
                     </Box>
 
                     <TableContainer sx={{ overflowX: 'auto' }}>
-                        <Table sx={{ minWidth: 920 }}>
+                        <Table sx={{ minWidth: 1040 }}>
                             <TableHead>
                                 <TableRow>
                                     <TableCell sx={{ fontWeight: 700 }}>CUSTOMER</TableCell>
@@ -211,13 +270,14 @@ const CreditCustomersPage: React.FC = () => {
                                     <TableCell sx={{ fontWeight: 700 }}>RECOVERED</TableCell>
                                     <TableCell sx={{ fontWeight: 700 }}>OUTSTANDING</TableCell>
                                     <TableCell sx={{ fontWeight: 700 }}>LAST SALE</TableCell>
-                                    <TableCell align="right" sx={{ fontWeight: 700 }}>ACTION</TableCell>
+                                    <TableCell sx={{ fontWeight: 700 }}>NEXT DUE</TableCell>
+                                    <TableCell align="right" className="no-print" sx={{ fontWeight: 700 }}>ACTION</TableCell>
                                 </TableRow>
                             </TableHead>
                             <TableBody>
                                 {filteredCustomers.length === 0 ? (
                                     <TableRow>
-                                        <TableCell colSpan={8} align="center" sx={{ py: 8 }}>
+                                        <TableCell colSpan={9} align="center" sx={{ py: 8 }}>
                                             <Typography color="text.secondary">
                                                 {loading ? 'Loading credit customers...' : 'No outstanding credit customers right now.'}
                                             </Typography>
@@ -239,7 +299,12 @@ const CreditCustomersPage: React.FC = () => {
                                             <TableCell>
                                                 {customer.lastSaleAt ? new Date(customer.lastSaleAt).toLocaleString() : '-'}
                                             </TableCell>
-                                            <TableCell align="right">
+                                            <TableCell>
+                                                {customer.nextDueDate
+                                                    ? new Date(customer.nextDueDate).toLocaleDateString()
+                                                    : '-'}
+                                            </TableCell>
+                                            <TableCell align="right" className="no-print">
                                                 <Button
                                                     variant="contained"
                                                     size="small"
@@ -257,6 +322,24 @@ const CreditCustomersPage: React.FC = () => {
                     </TableContainer>
                 </CardContent>
             </Card>
+
+            <style>
+                {`
+                .print-only { display: none; }
+                @media print {
+                    body * { visibility: hidden; }
+                    #printable-credit-customers, #printable-credit-customers * { visibility: visible; }
+                    #printable-credit-customers {
+                        position: absolute;
+                        left: 0;
+                        top: 0;
+                        width: 100%;
+                    }
+                    .no-print { display: none !important; }
+                    .print-only { display: block !important; }
+                }
+                `}
+            </style>
 
             <Dialog open={Boolean(selectedCustomer)} onClose={handleClosePayment} maxWidth="xs" fullWidth>
                 <DialogTitle>Update Customer Payment</DialogTitle>
@@ -283,6 +366,15 @@ const CreditCustomersPage: React.FC = () => {
                             />
 
                             <TextField
+                                fullWidth
+                                type="date"
+                                label="Payment Date"
+                                InputLabelProps={{ shrink: true }}
+                                value={paymentDate}
+                                onChange={(e) => setPaymentDate(e.target.value)}
+                            />
+
+                            <TextField
                                 select
                                 fullWidth
                                 label="Paid Via"
@@ -292,6 +384,24 @@ const CreditCustomersPage: React.FC = () => {
                                 <MenuItem value="cash">Cash</MenuItem>
                                 <MenuItem value="card">Card</MenuItem>
                             </TextField>
+
+                            {isPartialPayment && (
+                                <Box>
+                                    <Typography variant="body2" color="warning.main" fontWeight={800} sx={{ mb: 1 }}>
+                                        {formatCurrency(remainingAfterPayment, { minimumFractionDigits: 0, maximumFractionDigits: 2 })} will still be outstanding. When will it be paid?
+                                    </Typography>
+                                    <TextField
+                                        fullWidth
+                                        type="date"
+                                        label="Remaining Amount Due Date"
+                                        InputLabelProps={{ shrink: true }}
+                                        value={nextDueDate}
+                                        onChange={(e) => setNextDueDate(e.target.value)}
+                                        inputProps={{ min: paymentDate }}
+                                        required
+                                    />
+                                </Box>
+                            )}
 
                             <TextField
                                 fullWidth
@@ -306,7 +416,11 @@ const CreditCustomersPage: React.FC = () => {
                 </DialogContent>
                 <DialogActions sx={{ p: 2.5 }}>
                     <Button variant="outlined" onClick={handleClosePayment}>Cancel</Button>
-                    <Button variant="contained" onClick={handleSubmitPayment} disabled={saving}>
+                    <Button
+                        variant="contained"
+                        onClick={handleSubmitPayment}
+                        disabled={saving || (isPartialPayment && !nextDueDate)}
+                    >
                         {saving ? 'Saving...' : 'Save Payment'}
                     </Button>
                 </DialogActions>

@@ -37,6 +37,7 @@ const getOutstandingCreditCustomers = async (tenant: TenantContext) => {
         ]),
         CreditPayment.aggregate([
             { $match: tenantFilter },
+            { $sort: { timestamp: -1 } },
             {
                 $group: {
                     _id: {
@@ -45,6 +46,7 @@ const getOutstandingCreditCustomers = async (tenant: TenantContext) => {
                     },
                     totalRecovered: { $sum: '$amount' },
                     lastPaymentAt: { $max: '$timestamp' },
+                    latestNextDueDate: { $first: '$nextDueDate' },
                 }
             }
         ])
@@ -74,6 +76,7 @@ const getOutstandingCreditCustomers = async (tenant: TenantContext) => {
                 outstandingAmount,
                 lastSaleAt: sale.lastSaleAt,
                 lastPaymentAt: payment?.lastPaymentAt || null,
+                nextDueDate: payment?.latestNextDueDate || null,
             };
         })
         .filter((customer) => customer.outstandingAmount > 0)
@@ -116,6 +119,23 @@ export const createCreditPayment = async (req: AuthRequest, res: Response) => {
             });
         }
 
+        const timestamp = req.body.paymentDate ? new Date(req.body.paymentDate) : new Date();
+        if (Number.isNaN(timestamp.getTime())) {
+            return res.status(400).json({ message: 'Invalid payment date' });
+        }
+
+        const remainingAfterPayment = customer.outstandingAmount - amount;
+        let nextDueDate: Date | null = null;
+        if (remainingAfterPayment > 0) {
+            if (!req.body.nextDueDate) {
+                return res.status(400).json({ message: 'Please provide a due date for the remaining balance' });
+            }
+            nextDueDate = new Date(req.body.nextDueDate);
+            if (Number.isNaN(nextDueDate.getTime())) {
+                return res.status(400).json({ message: 'Invalid due date for the remaining balance' });
+            }
+        }
+
         const payment = await CreditPayment.create({
             customerName,
             customerCnic,
@@ -123,6 +143,8 @@ export const createCreditPayment = async (req: AuthRequest, res: Response) => {
             paidVia,
             receivedBy: req.user?.id || 'unknown',
             notes,
+            timestamp,
+            nextDueDate,
             businessId: getTenantObjectId(req.user!),
         });
 

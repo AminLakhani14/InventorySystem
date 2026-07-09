@@ -26,6 +26,7 @@ import {
   CalendarDays,
   Eye,
   Package,
+  Printer,
   Search,
   UserRound,
   WalletCards,
@@ -142,7 +143,24 @@ const CustomerRecordsPage: React.FC = () => {
     null,
   );
   const [searchTerm, setSearchTerm] = React.useState("");
+  const [fromDate, setFromDate] = React.useState("");
+  const [toDate, setToDate] = React.useState("");
+  const [printingDayKey, setPrintingDayKey] = React.useState<string | null>(
+    null,
+  );
   const [error, setError] = React.useState("");
+
+  React.useEffect(() => {
+    if (printingDayKey) {
+      window.print();
+    }
+  }, [printingDayKey]);
+
+  React.useEffect(() => {
+    const handleAfterPrint = () => setPrintingDayKey(null);
+    window.addEventListener("afterprint", handleAfterPrint);
+    return () => window.removeEventListener("afterprint", handleAfterPrint);
+  }, []);
 
   React.useEffect(() => {
     dispatch(fetchTransactions());
@@ -173,6 +191,13 @@ const CustomerRecordsPage: React.FC = () => {
   const customerRecords = React.useMemo<CustomerRecord[]>(() => {
     const sales = transactions
       .filter((tx) => tx.type === "reduction")
+      .filter((tx) => {
+        if (!fromDate && !toDate) return true;
+        const ts = new Date(tx.timestamp);
+        if (fromDate && ts < new Date(`${fromDate}T00:00:00`)) return false;
+        if (toDate && ts > new Date(`${toDate}T23:59:59.999`)) return false;
+        return true;
+      })
       .sort(
         (a, b) =>
           new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
@@ -274,7 +299,7 @@ const CustomerRecordsPage: React.FC = () => {
           new Date(b.lastPurchaseAt).getTime() -
           new Date(a.lastPurchaseAt).getTime(),
       );
-  }, [transactions, creditOutstandingMap]);
+  }, [transactions, creditOutstandingMap, fromDate, toDate]);
 
   React.useEffect(() => {
     if (!loading && transactions.length === 0) {
@@ -289,10 +314,32 @@ const CustomerRecordsPage: React.FC = () => {
   const filteredRecords = React.useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
     if (!query) return customerRecords;
-    return customerRecords.filter((record) =>
-      record.name.toLowerCase().includes(query),
-    );
+    return customerRecords.filter((record) => {
+      const haystack = [
+        record.name,
+        record.cnic,
+        record.lastPurchaseAt
+          ? new Date(record.lastPurchaseAt).toLocaleDateString()
+          : "",
+        String(record.totalQuantity),
+        String(record.totalAmount),
+        String(record.receivedAmount),
+        String(record.amountToReceive),
+        record.days.map((day) => day.itemSummary).join(", "),
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(query);
+    });
   }, [customerRecords, searchTerm]);
+
+  const handlePrint = () => {
+    window.print();
+  };
+
+  const handlePrintDay = (dateKey: string) => {
+    setPrintingDayKey(dateKey);
+  };
 
   const summary = React.useMemo(() => {
     return customerRecords.reduce(
@@ -374,6 +421,7 @@ const CustomerRecordsPage: React.FC = () => {
 
       {!detailRecord && (
         <Card
+          id="printable-customer-records"
           sx={{
             borderRadius: "8px",
             border: "1px solid",
@@ -382,7 +430,46 @@ const CustomerRecordsPage: React.FC = () => {
           }}
         >
           <CardContent sx={{ p: 0 }}>
+            <Box className="print-only" sx={{ display: "none", p: 2.5 }}>
+              <Typography variant="h5" fontWeight={900}>
+                Customer Records
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Generated on {new Date().toLocaleString()}
+              </Typography>
+              <Stack direction="row" spacing={3} sx={{ mt: 1 }}>
+                <Typography variant="body2">
+                  Customers: {summary.customers}
+                </Typography>
+                <Typography variant="body2">
+                  Total Qty: {summary.quantity}
+                </Typography>
+                <Typography variant="body2">
+                  Total Amount:{" "}
+                  {formatCurrency(summary.amount, {
+                    minimumFractionDigits: 0,
+                    maximumFractionDigits: 0,
+                  })}
+                </Typography>
+                <Typography variant="body2">
+                  Received:{" "}
+                  {formatCurrency(summary.received, {
+                    minimumFractionDigits: 0,
+                    maximumFractionDigits: 0,
+                  })}
+                </Typography>
+                <Typography variant="body2">
+                  Remaining:{" "}
+                  {formatCurrency(summary.receive, {
+                    minimumFractionDigits: 0,
+                    maximumFractionDigits: 0,
+                  })}
+                </Typography>
+              </Stack>
+            </Box>
+
             <Box
+              className="no-print"
               sx={{
                 p: 2.5,
                 display: "flex",
@@ -395,7 +482,7 @@ const CustomerRecordsPage: React.FC = () => {
             >
               <TextField
                 size="small"
-                placeholder="Search customer..."
+                placeholder="Search customer, date, qty, amount..."
                 value={searchTerm}
                 onChange={(event) => setSearchTerm(event.target.value)}
                 InputProps={{
@@ -405,8 +492,44 @@ const CustomerRecordsPage: React.FC = () => {
                     </InputAdornment>
                   ),
                 }}
-                sx={{ minWidth: { xs: "100%", sm: 360 } }}
+                sx={{ minWidth: { xs: "100%", sm: 300 } }}
               />
+              <TextField
+                size="small"
+                type="date"
+                label="From"
+                InputLabelProps={{ shrink: true }}
+                value={fromDate}
+                onChange={(event) => setFromDate(event.target.value)}
+              />
+              <TextField
+                size="small"
+                type="date"
+                label="To"
+                InputLabelProps={{ shrink: true }}
+                value={toDate}
+                onChange={(event) => setToDate(event.target.value)}
+              />
+              {(fromDate || toDate) && (
+                <Button
+                  size="small"
+                  onClick={() => {
+                    setFromDate("");
+                    setToDate("");
+                  }}
+                  sx={{ fontWeight: 800 }}
+                >
+                  Clear Dates
+                </Button>
+              )}
+              <Button
+                variant="outlined"
+                startIcon={<Printer size={18} />}
+                onClick={handlePrint}
+                sx={{ fontWeight: 800, ml: "auto" }}
+              >
+                Print
+              </Button>
             </Box>
 
             <TableContainer sx={{ overflowX: "auto" }}>
@@ -421,7 +544,11 @@ const CustomerRecordsPage: React.FC = () => {
                     <TableCell sx={{ fontWeight: 900 }}>TOTAL AMOUNT</TableCell>
                     <TableCell sx={{ fontWeight: 900 }}>RECEIVED</TableCell>
                     <TableCell sx={{ fontWeight: 900 }}>REMAINING</TableCell>
-                    <TableCell align="right" sx={{ fontWeight: 900 }}>
+                    <TableCell
+                      align="right"
+                      className="no-print"
+                      sx={{ fontWeight: 900 }}
+                    >
                       ACTION
                     </TableCell>
                   </TableRow>
@@ -518,7 +645,7 @@ const CustomerRecordsPage: React.FC = () => {
                             maximumFractionDigits: 0,
                           })}
                         </TableCell>
-                        <TableCell align="right">
+                        <TableCell align="right" className="no-print">
                           <Button
                             size="small"
                             variant="outlined"
@@ -539,8 +666,29 @@ const CustomerRecordsPage: React.FC = () => {
         </Card>
       )}
 
+      {!detailRecord && (
+        <style>
+          {`
+          .print-only { display: none; }
+          @media print {
+              body * { visibility: hidden; }
+              #printable-customer-records, #printable-customer-records * { visibility: visible; }
+              #printable-customer-records {
+                  position: absolute;
+                  left: 0;
+                  top: 0;
+                  width: 100%;
+              }
+              .no-print { display: none !important; }
+              .print-only { display: block !important; }
+          }
+          `}
+        </style>
+      )}
+
       {detailRecord && (
         <Card
+          id="printable-customer-detail"
           sx={{
             borderRadius: "8px",
             border: "1px solid",
@@ -550,6 +698,7 @@ const CustomerRecordsPage: React.FC = () => {
         >
           <CardContent sx={{ p: 0 }}>
             <Box
+              className="no-print"
               sx={{
                 p: { xs: 2, md: 3 },
                 display: "flex",
@@ -743,6 +892,7 @@ const CustomerRecordsPage: React.FC = () => {
                   {detailRecord.days.map((day) => (
                     <Box
                       key={day.dateKey}
+                      data-daykey={day.dateKey}
                       sx={{
                         border: "1px solid",
                         borderColor: "divider",
@@ -818,6 +968,16 @@ const CustomerRecordsPage: React.FC = () => {
                               }
                               sx={{ fontWeight: 800 }}
                             />
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              className="no-print"
+                              startIcon={<Printer size={14} />}
+                              onClick={() => handlePrintDay(day.dateKey)}
+                              sx={{ fontWeight: 800 }}
+                            >
+                              Print
+                            </Button>
                           </Stack>
                         </Box>
                       </Box>
@@ -912,6 +1072,25 @@ const CustomerRecordsPage: React.FC = () => {
             </Box>
           </CardContent>
         </Card>
+      )}
+
+      {detailRecord && (
+        <style>
+          {`
+          @media print {
+              body * { visibility: hidden; }
+              #printable-customer-detail, #printable-customer-detail * { visibility: visible; }
+              #printable-customer-detail {
+                  position: absolute;
+                  left: 0;
+                  top: 0;
+                  width: 100%;
+              }
+              .no-print { display: none !important; }
+              ${printingDayKey ? `[data-daykey]:not([data-daykey="${printingDayKey}"]) { display: none !important; }` : ""}
+          }
+          `}
+        </style>
       )}
     </Box>
   );
