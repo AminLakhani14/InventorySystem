@@ -32,7 +32,8 @@ const configuredOrigins = process.env.CLIENT_URL
     : [];
 
 const defaultAllowedOrigins = [
-    'https://itemhiveinventorysystem.netlify.app',
+    // 'https://itemhiveinventorysystem.netlify.app',
+    'http://owaisinventorysystem.netlify.app',
     'http://localhost:5173'
 ];
 
