@@ -8,6 +8,7 @@ export interface ICreditPayment extends Document {
     receivedBy: string;
     notes?: string;
     timestamp: Date;
+    nextDueDate?: Date | null;
     businessId?: mongoose.Types.ObjectId;
 }
 
@@ -19,6 +20,7 @@ const CreditPaymentSchema: Schema<ICreditPayment> = new Schema({
     receivedBy: { type: String, required: true, trim: true },
     notes: { type: String, default: '' },
     timestamp: { type: Date, default: Date.now, index: true },
+    nextDueDate: { type: Date, default: null },
     businessId: { type: Schema.Types.ObjectId, ref: 'Business', default: null, index: true },
 }, { timestamps: true });
 
