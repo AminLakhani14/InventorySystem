@@ -27,8 +27,10 @@ import {
     CalendarDays,
     BadgeDollarSign
 } from 'lucide-react';
-import { useSelector } from 'react-redux';
-import type { RootState } from '../../store';
+import { useDispatch, useSelector } from 'react-redux';
+import type { AppDispatch, RootState } from '../../store';
+import { fetchProducts } from '../../features/inventory/inventorySlice';
+import { fetchTransactions } from '../../features/transactions/transactionSlice';
 import {
     AreaChart,
     Area,
@@ -52,11 +54,21 @@ type StatColor = 'primary' | 'success' | 'error' | 'warning';
 
 const Dashboard: React.FC = () => {
     const theme = useTheme();
+    const dispatch = useDispatch<AppDispatch>();
     const navigate = useNavigate();
     const { products } = useSelector((state: RootState) => state.inventory);
     const { transactions = [] } = useSelector((state: RootState) => state.transactions || { transactions: [] });
-    const { user } = useSelector((state: RootState) => state.auth);
+    const { isAuthenticated, user } = useSelector((state: RootState) => state.auth);
     const { currency, formatCurrency } = useAppCurrency();
+
+    React.useEffect(() => {
+        if (!isAuthenticated || !user) {
+            return;
+        }
+
+        dispatch(fetchProducts());
+        dispatch(fetchTransactions());
+    }, [dispatch, isAuthenticated, user]);
 
     const totalStock = products.reduce((acc, p) => acc + p.stock, 0);
     const lowStockItems = products.filter(p => p.stock <= p.minStock);

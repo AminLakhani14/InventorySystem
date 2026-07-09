@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Box,
   Typography,
@@ -23,21 +23,29 @@ import {
   TableRow,
   TableContainer,
   Alert,
+  CircularProgress,
   MenuItem,
   Stack,
 } from "@mui/material";
 import {
   BadgeDollarSign,
   Banknote,
+  Check,
   CheckCircle2,
   ClipboardList,
   Download,
   FileDown,
+  Image as ImageIcon,
+  Link as LinkIcon,
+  Plus,
   Package,
   ReceiptText,
   Search,
   Share2,
   ShoppingBag,
+  Sparkles,
+  Trash2,
+  Upload,
   UserRound,
   UserRoundPlus,
   XCircle,
@@ -52,10 +60,14 @@ import {
   type OrderLineItem,
 } from "../../features/orders/ordersSlice";
 import {
+  addProductApi,
+  fetchProductImageSuggestions,
   fetchProducts,
+  PRODUCT_CATEGORIES,
   resolveProductImage,
   placeholderFallback,
   type Product,
+  type ProductImageSuggestion,
 } from "../../features/inventory/inventorySlice";
 import {
   addTransactionApi,
@@ -70,7 +82,12 @@ import {
   pakistanProvinces,
 } from "../../lib/pakistanLocations";
 import { createHiddenCustomerId } from "../../lib/customerIdentity";
-import { getProductUnitLabel } from "../../lib/productUnits";
+import {
+  DEFAULT_PRODUCT_UNIT,
+  getProductUnit,
+  getProductUnitLabel,
+  PRODUCT_UNITS,
+} from "../../lib/productUnits";
 
 type CustomerType = "regular" | "credit" | "installment" | "wholesale";
 type CustomerStatus = "active" | "inactive";
@@ -104,6 +121,27 @@ interface CreateCustomerOption {
 
 type CustomerOption = Customer | CreateCustomerOption;
 
+interface CreateProductOption {
+  id: "new-product-action";
+  name: string;
+  isCreateAction: true;
+}
+
+type ProductOption = Product | CreateProductOption;
+
+const initialProductForm = {
+  sku: "",
+  name: "",
+  category: "",
+  purchasePrice: "",
+  salePrice: "",
+  stock: "",
+  minStock: "",
+  productUnitCode: DEFAULT_PRODUCT_UNIT.code,
+  description: "",
+  imageUrl: "",
+};
+
 const initialCustomerForm = {
   fullName: "",
   phoneNumber: "",
@@ -123,9 +161,19 @@ const createCustomerOption: CreateCustomerOption = {
   isCreateAction: true,
 };
 
+const createProductOption: CreateProductOption = {
+  id: "new-product-action",
+  name: "Add New Product",
+  isCreateAction: true,
+};
+
 const isCreateCustomerOption = (
   option: CustomerOption,
 ): option is CreateCustomerOption => "isCreateAction" in option;
+
+const isCreateProductOption = (
+  option: ProductOption,
+): option is CreateProductOption => "isCreateAction" in option;
 
 const paymentMethodLabels: Record<OrderPaymentMethod, string> = {
   cash: "Cash",
@@ -190,6 +238,18 @@ const OrderDesk: React.FC = () => {
   };
 
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [productSearchText, setProductSearchText] = useState("");
+  const [productDialogOpen, setProductDialogOpen] = useState(false);
+  const [productForm, setProductForm] = useState(initialProductForm);
+  const [productSaving, setProductSaving] = useState(false);
+  const [productSaveError, setProductSaveError] = useState("");
+  const [productImageSuggestions, setProductImageSuggestions] = useState<ProductImageSuggestion[]>([]);
+  const [productSuggestionsLoading, setProductSuggestionsLoading] = useState(false);
+  const [productImageError, setProductImageError] = useState("");
+  const [productSuggestionError, setProductSuggestionError] = useState("");
+  const [productImageUrlInput, setProductImageUrlInput] = useState("");
+  const [selectedProductSuggestionId, setSelectedProductSuggestionId] = useState("");
+  const productFileInputRef = useRef<HTMLInputElement | null>(null);
   const [quantity, setQuantity] = useState<number | string>(1);
   const [rate, setRate] = useState<number | string>("");
   const [lineItems, setLineItems] = useState<OrderLineItem[]>([]);
@@ -272,6 +332,7 @@ const OrderDesk: React.FC = () => {
         selectedProduct.productUnitUrdu,
       )
     : "";
+  const productFormSelectedUnit = getProductUnit(productForm.productUnitCode);
   const pendingLineComplete = Boolean(
     selectedProduct && requestedQty > 0 && numericRate > 0 && Number(lineAmount || 0) > 0,
   );
@@ -407,6 +468,10 @@ const OrderDesk: React.FC = () => {
     ],
     [customers, isManager],
   );
+  const productOptions = useMemo<ProductOption[]>(
+    () => [createProductOption, ...products],
+    [products],
+  );
   const customerCityOptions = useMemo(
     () =>
       customerForm.province ? getCitiesForProvince(customerForm.province) : [],
@@ -470,6 +535,221 @@ const OrderDesk: React.FC = () => {
     setLineItems((current) => current.filter((line) => line.lineId !== lineId));
   };
 
+  const openNewProductDialog = () => {
+    setProductForm({
+      ...initialProductForm,
+      name: productSearchText.trim(),
+    });
+    setProductSaveError("");
+    setProductDialogOpen(true);
+  };
+
+  const resetProductDialog = () => {
+    setProductDialogOpen(false);
+    setProductForm(initialProductForm);
+    setProductSaveError("");
+    setProductImageSuggestions([]);
+    setProductSuggestionsLoading(false);
+    setProductImageError("");
+    setProductSuggestionError("");
+    setProductImageUrlInput("");
+    setSelectedProductSuggestionId("");
+  };
+
+  const handleProductFormChange = (
+    field: keyof typeof initialProductForm,
+    value: string,
+  ) => {
+    setProductForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const applyProductImageUrl = (
+    nextImageUrl: string,
+    source: "suggestion" | "manual",
+  ) => {
+    setProductForm((current) => ({ ...current, imageUrl: nextImageUrl }));
+    setProductImageError("");
+
+    if (source === "manual") {
+      setSelectedProductSuggestionId("");
+    }
+  };
+
+  const handleUseProductImageUrl = () => {
+    const trimmed = productImageUrlInput.trim();
+
+    if (!trimmed) {
+      setProductImageError("Paste an image URL first.");
+      return;
+    }
+
+    try {
+      const parsedUrl = new URL(trimmed);
+      if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+        throw new Error("Invalid protocol");
+      }
+      applyProductImageUrl(trimmed, "manual");
+    } catch {
+      setProductImageError("Please enter a valid http or https image URL.");
+    }
+  };
+
+  const handleProductSuggestionLookup = async () => {
+    const trimmedName = productForm.name.trim();
+
+    if (trimmedName.length < 2) {
+      setProductSuggestionError("Enter a product name first so we can suggest images.");
+      return;
+    }
+
+    setProductSuggestionsLoading(true);
+    setProductSuggestionError("");
+
+    try {
+      const suggestions = (await dispatch(
+        fetchProductImageSuggestions({
+          name: trimmedName,
+          category: productForm.category || undefined,
+        }),
+      ).unwrap()) as ProductImageSuggestion[];
+      setProductImageSuggestions(suggestions);
+
+      if (suggestions.length === 0) {
+        setProductSuggestionError(
+          "No strong image matches were found. You can still upload a file or paste an image URL.",
+        );
+      }
+    } catch (error: unknown) {
+      setProductImageSuggestions([]);
+      setProductSuggestionError(
+        getApiErrorMessage(error, "Unable to fetch image suggestions right now."),
+      );
+    } finally {
+      setProductSuggestionsLoading(false);
+    }
+  };
+
+  const handleSelectProductSuggestion = (suggestion: ProductImageSuggestion) => {
+    setSelectedProductSuggestionId(suggestion.id);
+    applyProductImageUrl(suggestion.imageUrl, "suggestion");
+  };
+
+  const readProductFileAsDataUrl = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error("Unable to read the selected file"));
+      reader.readAsDataURL(file);
+    });
+
+  const handleProductImageFile = async (file?: File) => {
+    if (!file) {
+      return;
+    }
+
+    if (!file.type.startsWith("image/")) {
+      setProductImageError("Please choose an image file.");
+      return;
+    }
+
+    if (file.size > 1_500_000) {
+      setProductImageError("Please use an image smaller than 1.5 MB for now.");
+      return;
+    }
+
+    try {
+      const dataUrl = await readProductFileAsDataUrl(file);
+      applyProductImageUrl(dataUrl, "manual");
+    } catch (error: unknown) {
+      setProductImageError(
+        getApiErrorMessage(error, "Unable to read the image file."),
+      );
+    }
+  };
+
+  const handleProductFileInputChange = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    await handleProductImageFile(event.target.files?.[0]);
+    event.target.value = "";
+  };
+
+  const handleProductImageDrop = async (
+    event: React.DragEvent<HTMLDivElement>,
+  ) => {
+    event.preventDefault();
+    await handleProductImageFile(event.dataTransfer.files?.[0]);
+  };
+
+  const clearProductImage = () => {
+    setProductForm((current) => ({ ...current, imageUrl: "" }));
+    setProductImageUrlInput("");
+    setSelectedProductSuggestionId("");
+    setProductImageError("");
+  };
+
+  const handleCreateProduct = async () => {
+    setProductSaveError("");
+
+    const trimmedSku = productForm.sku.trim().toUpperCase();
+    const trimmedName = productForm.name.trim();
+    if (!trimmedSku || !trimmedName) {
+      setProductSaveError("SKU and product name are required.");
+      return;
+    }
+
+    if (products.some((product) => product.sku.toUpperCase() === trimmedSku)) {
+      setProductSaveError("A product with this SKU already exists.");
+      return;
+    }
+
+    const selectedUnit = getProductUnit(productForm.productUnitCode);
+    const payload: Product = {
+      id: Math.random().toString(36).slice(2, 11),
+      sku: trimmedSku,
+      name: trimmedName,
+      category: productForm.category || "Uncategorized",
+      purchasePrice: Number(productForm.purchasePrice || 0),
+      salePrice: Number(productForm.salePrice || 0),
+      price: Number(productForm.salePrice || 0),
+      stock: Math.max(0, parseInt(productForm.stock || "0", 10)),
+      minStock: Math.max(0, parseInt(productForm.minStock || "0", 10)),
+      productUnitCode: selectedUnit.code,
+      productUnit: selectedUnit.english,
+      productUnitUrdu: selectedUnit.urdu,
+      description: productForm.description,
+      imageUrl: productForm.imageUrl,
+    };
+
+    setProductSaving(true);
+    try {
+      if (isManager) {
+        const createdProduct = await dispatch(addProductApi(payload)).unwrap();
+        setSelectedProduct(createdProduct);
+        setProductSearchText(createdProduct.name);
+        setRate(createdProduct.salePrice || createdProduct.price || "");
+        setFeedback({
+          type: "success",
+          message: `${createdProduct.name} added and selected for this order.`,
+        });
+      } else {
+        await api.post("/inventory-requests", payload);
+        setFeedback({
+          type: "success",
+          message: "Product request submitted for approval.",
+        });
+      }
+      resetProductDialog();
+      dispatch(fetchProducts());
+    } catch (error: unknown) {
+      setProductSaveError(
+        getApiErrorMessage(error, "Unable to save this product right now."),
+      );
+    } finally {
+      setProductSaving(false);
+    }
+  };
+
   const validateOrderBeforePayment = () => {
     if (pendingLineStarted && !pendingLineComplete) {
       setFeedback({
@@ -494,11 +774,6 @@ const OrderDesk: React.FC = () => {
     if (!validateOrderBeforePayment()) return;
 
     setPaymentMethod(method);
-
-    if (!enoughStock) {
-      void executeOrder(method, 0, currentOrderTotal);
-      return;
-    }
 
     if (method === "credit") {
       setCreditPaidInput("");
@@ -987,6 +1262,8 @@ const OrderDesk: React.FC = () => {
       "Product",
       "Quantity",
       "Amount",
+      "Paid Amount",
+      "Remaining Amount",
       "Payment",
       "Status",
       "Reason",
@@ -999,6 +1276,8 @@ const OrderDesk: React.FC = () => {
       getLineProductLabel(order.lineItems, order.productName),
       order.quantity.toString(),
       String(order.orderAmount || 0),
+      String(order.paidNow || 0),
+      String(order.dueAmount || 0),
       paymentMethodLabels[order.paymentMethod || "cash"],
       order.status,
       order.notes || "",
@@ -1033,12 +1312,44 @@ const OrderDesk: React.FC = () => {
   };
 
   const handlePrintInvoice = () => {
-    setPrintTarget("invoice");
-    window.setTimeout(() => window.print(), 0);
+    if (!invoiceOrder) return;
+
+    const printWindow = window.open("", "_blank", "width=900,height=700");
+    if (!printWindow) {
+      setFeedback({
+        type: "error",
+        message: "Allow pop-ups to print the invoice.",
+      });
+      return;
+    }
+
+    printWindow.document.open();
+    printWindow.document.write(buildInvoicePrintHtml(invoiceOrder));
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.setTimeout(() => {
+      printWindow.print();
+      printWindow.close();
+    }, 250);
   };
 
-  const buildInvoiceShareText = (order: Order) => {
-    const lines = order.lineItems?.length
+  const handleDownloadInvoicePDF = () => {
+    if (!invoiceOrder) return;
+
+    const blob = buildInvoicePdfBlob(invoiceOrder);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `invoice_${invoiceOrder.id}.pdf`;
+    link.style.display = "none";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const getInvoiceLines = (order: Order): OrderLineItem[] =>
+    order.lineItems?.length
       ? order.lineItems
       : [
           {
@@ -1053,6 +1364,266 @@ const OrderDesk: React.FC = () => {
             amount: Number(order.orderAmount || 0),
           },
         ];
+
+  const escapeHtml = (value: unknown) =>
+    String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+
+  const buildInvoicePrintHtml = (order: Order) => {
+    const rows = getInvoiceLines(order)
+      .map(
+        (line) => `
+          <tr>
+            <td>${escapeHtml(line.productName)}</td>
+            <td>${escapeHtml(getProductUnitLabel(line.productUnitCode, line.productUnit, line.productUnitUrdu))}</td>
+            <td class="right">${line.quantity}</td>
+            <td class="right">${escapeHtml(formatCurrency(line.rate, { minimumFractionDigits: 0, maximumFractionDigits: 2 }))}</td>
+            <td class="right">${escapeHtml(formatCurrency(line.amount, { minimumFractionDigits: 0, maximumFractionDigits: 2 }))}</td>
+          </tr>
+        `,
+      )
+      .join("");
+
+    return `
+      <!doctype html>
+      <html>
+        <head>
+          <title>Invoice #${escapeHtml(order.id)}</title>
+          <style>
+            @page { size: A4; margin: 14mm; }
+            * { box-sizing: border-box; }
+            body { margin: 0; color: #111827; font-family: Arial, sans-serif; font-size: 12px; }
+            .invoice { width: 100%; max-width: 760px; margin: 0 auto; }
+            .header, .total-row { display: flex; justify-content: space-between; gap: 16px; }
+            .header { align-items: flex-start; margin-bottom: 18px; }
+            h1 { margin: 0; font-size: 24px; }
+            .muted { color: #6b7280; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+            .strong { font-weight: 800; }
+            .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px 24px; margin: 18px 0; }
+            table { width: 100%; border-collapse: collapse; margin: 18px 0; }
+            th { background: #eef2ff; text-align: left; font-size: 11px; text-transform: uppercase; }
+            th, td { border: 1px solid #e5e7eb; padding: 9px; vertical-align: top; }
+            .right { text-align: right; }
+            .totals { width: 300px; margin-left: auto; }
+            .total-row { padding: 7px 0; border-bottom: 1px solid #e5e7eb; }
+            .note { margin-top: 16px; padding: 10px; border: 1px solid #bfdbfe; background: #eff6ff; }
+          </style>
+        </head>
+        <body>
+          <section class="invoice">
+            <div class="header">
+              <div>
+                <div class="muted">Order Invoice</div>
+                <h1>#${escapeHtml(order.id)}</h1>
+              </div>
+              <div class="right">
+                <div class="muted">Date</div>
+                <div class="strong">${escapeHtml(new Date(order.timestamp).toLocaleString())}</div>
+              </div>
+            </div>
+            <div class="grid">
+              <div><div class="muted">Customer</div><div class="strong">${escapeHtml(order.customerName || ANONYMOUS_CUSTOMER_NAME)}</div></div>
+              <div><div class="muted">Cashier / Requested By</div><div class="strong">${escapeHtml(order.requestedBy)}</div></div>
+              <div><div class="muted">Payment Method</div><div class="strong">${escapeHtml(paymentMethodLabels[order.paymentMethod || "cash"])}</div></div>
+              <div><div class="muted">Status</div><div class="strong">${escapeHtml(order.status)}</div></div>
+            </div>
+            <table>
+              <thead>
+                <tr><th>Product</th><th>Unit</th><th class="right">Qty</th><th class="right">Rate</th><th class="right">Amount</th></tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+            <div class="totals">
+              <div class="total-row"><span>Total</span><strong>${escapeHtml(formatCurrency(order.orderAmount || 0, { minimumFractionDigits: 0, maximumFractionDigits: 2 }))}</strong></div>
+              <div class="total-row"><span>Paid Now</span><strong>${escapeHtml(formatCurrency(order.paidNow || 0, { minimumFractionDigits: 0, maximumFractionDigits: 2 }))}</strong></div>
+              <div class="total-row"><span>Amount To Receive</span><strong>${escapeHtml(formatCurrency(order.dueAmount || 0, { minimumFractionDigits: 0, maximumFractionDigits: 2 }))}</strong></div>
+            </div>
+            ${order.notes ? `<div class="note">${escapeHtml(order.notes)}</div>` : ""}
+          </section>
+        </body>
+      </html>
+    `;
+  };
+
+  const cleanPdfText = (value: unknown) =>
+    String(value ?? "")
+      .replace(/[^\x20-\x7E]/g, "")
+      .replace(/\s*\/\s*$/g, "")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+
+  const escapePdfText = (value: unknown) =>
+    cleanPdfText(value)
+      .replace(/\\/g, "\\\\")
+      .replace(/\(/g, "\\(")
+      .replace(/\)/g, "\\)");
+
+  const hexToPdfRgb = (hex: string) => {
+    const normalized = hex.replace("#", "");
+    const fullHex =
+      normalized.length === 3
+        ? normalized
+            .split("")
+            .map((char) => `${char}${char}`)
+            .join("")
+        : normalized.padEnd(6, "0").slice(0, 6);
+    const channels = [0, 2, 4].map((index) =>
+      parseInt(fullHex.slice(index, index + 2), 16),
+    );
+    return channels
+      .map((channel) => (Number.isFinite(channel) ? channel / 255 : 0).toFixed(3))
+      .join(" ");
+  };
+
+  const getPdfProductName = (name: string) => {
+    const asciiParts = name
+      .split("/")
+      .map((part) => cleanPdfText(part))
+      .filter(Boolean);
+    return asciiParts[0] || cleanPdfText(name) || "Product";
+  };
+
+  const buildInvoicePdfBlob = (order: Order) => {
+    const lines = getInvoiceLines(order);
+    const printableUnit = (line: OrderLineItem) =>
+      line.productUnit ||
+      getProductUnitLabel(
+        line.productUnitCode,
+        line.productUnit,
+        line.productUnitUrdu,
+      );
+    const themePrimaryRgb = hexToPdfRgb(theme.palette.primary.main);
+    const themeHeaderRgb = `${themePrimaryRgb} rg`;
+    const themeHeaderStrokeRgb = `${themePrimaryRgb} RG`;
+    const text = (
+      value: unknown,
+      x: number,
+      y: number,
+      size = 10,
+      bold = false,
+      color = "0.06 0.09 0.16 rg",
+    ) =>
+      `BT ${color} /${bold ? "F2" : "F1"} ${size} Tf ${x} ${y} Td (${escapePdfText(value)}) Tj ET`;
+    const rightText = (
+      value: unknown,
+      rightX: number,
+      y: number,
+      size = 10,
+      bold = false,
+      color = "0.06 0.09 0.16 rg",
+    ) => {
+      const valueText = cleanPdfText(value);
+      const approxWidth = valueText.length * size * 0.52;
+      return text(valueText, Math.max(40, rightX - approxWidth), y, size, bold, color);
+    };
+    const rect = (
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+      fill: string,
+      stroke?: string,
+    ) =>
+      [
+        "q",
+        fill,
+        stroke || "",
+        `${x} ${y} ${width} ${height} re`,
+        stroke ? "B" : "f",
+        "Q",
+      ]
+        .filter(Boolean)
+        .join("\n");
+    const line = (x1: number, y1: number, x2: number, y2: number, color = "0.88 0.9 0.94 RG") =>
+      `q ${color} ${x1} ${y1} m ${x2} ${y2} l S Q`;
+
+    const commands: string[] = [
+      rect(0, 0, 595, 842, "0.98 0.99 1 rg"),
+      rect(40, 714, 515, 92, themeHeaderRgb),
+      text("ITEMHIVE", 72, 772, 18, true, "1 1 1 rg"),
+      text("Order Invoice", 72, 748, 11, false, "1 1 1 rg"),
+      rightText(`#${order.id}`, 518, 770, 18, true, "1 1 1 rg"),
+      rightText(new Date(order.timestamp).toLocaleString(), 518, 748, 10, false, "1 1 1 rg"),
+      rect(40, 594, 515, 96, "1 1 1 rg", themeHeaderStrokeRgb),
+      text("CUSTOMER", 62, 662, 8, true),
+      text(order.customerName || ANONYMOUS_CUSTOMER_NAME, 62, 644, 12, true),
+      text("CASHIER", 302, 662, 8, true),
+      text(order.requestedBy, 302, 644, 12, true),
+      text("PAYMENT METHOD", 62, 620, 8, true),
+      text(paymentMethodLabels[order.paymentMethod || "cash"], 62, 606, 11, true),
+      text("STATUS", 302, 620, 8, true),
+      text(order.status.toUpperCase(), 302, 606, 11, true),
+      rect(40, 540, 515, 30, "0.91 0.98 0.98 rg"),
+      text("Product", 58, 551, 9, true),
+      text("Unit", 278, 551, 9, true),
+      rightText("Qty", 377, 551, 9, true),
+      rightText("Rate", 457, 551, 9, true),
+      rightText("Amount", 532, 551, 9, true),
+    ];
+
+    let rowY = 509;
+    lines.slice(0, 12).forEach((item, index) => {
+      const rowFill = index % 2 === 0 ? "1 1 1 rg" : "0.985 0.987 0.992 rg";
+      commands.push(rect(40, rowY - 8, 515, 34, rowFill));
+      commands.push(line(40, rowY - 8, 555, rowY - 8));
+      commands.push(text(getPdfProductName(item.productName).slice(0, 34), 58, rowY + 4, 10, true));
+      commands.push(text(String(printableUnit(item)).slice(0, 18), 278, rowY + 4, 9));
+      commands.push(rightText(item.quantity, 377, rowY + 4, 9, true));
+      commands.push(rightText(formatCurrency(item.rate, { minimumFractionDigits: 0, maximumFractionDigits: 2 }), 457, rowY + 4, 9));
+      commands.push(rightText(formatCurrency(item.amount, { minimumFractionDigits: 0, maximumFractionDigits: 2 }), 532, rowY + 4, 9, true));
+      rowY -= 34;
+    });
+
+    const totalsTop = Math.max(rowY - 14, 250);
+    commands.push(rect(335, totalsTop - 94, 220, 94, "1 1 1 rg", "0.88 0.9 0.94 RG"));
+    commands.push(text("Total", 355, totalsTop - 24, 10));
+    commands.push(rightText(formatCurrency(order.orderAmount || 0, { minimumFractionDigits: 0, maximumFractionDigits: 2 }), 532, totalsTop - 24, 11, true));
+    commands.push(line(355, totalsTop - 38, 535, totalsTop - 38));
+    commands.push(text("Paid Now", 355, totalsTop - 54, 10));
+    commands.push(rightText(formatCurrency(order.paidNow || 0, { minimumFractionDigits: 0, maximumFractionDigits: 2 }), 532, totalsTop - 54, 11, true));
+    commands.push(line(355, totalsTop - 68, 535, totalsTop - 68));
+    commands.push(text("Amount To Receive", 355, totalsTop - 84, 10, true));
+    commands.push(rightText(formatCurrency(order.dueAmount || 0, { minimumFractionDigits: 0, maximumFractionDigits: 2 }), 532, totalsTop - 84, 12, true));
+
+    if (order.notes) {
+      commands.push(rect(40, totalsTop - 94, 270, 54, "0.91 0.98 0.98 rg", themeHeaderStrokeRgb));
+      commands.push(text("NOTES", 58, totalsTop - 62, 8, true));
+      commands.push(text(String(order.notes).slice(0, 58), 58, totalsTop - 82, 10));
+    }
+
+    commands.push(text("Thank you for your business.", 40, 52, 10, true));
+    commands.push(rightText("Generated by ItemHive", 555, 52, 9));
+
+    const stream = commands.join("\n");
+    const objects = [
+      "<< /Type /Catalog /Pages 2 0 R >>",
+      "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>",
+      "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+      "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
+      `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    ];
+    let pdf = "%PDF-1.4\n";
+    const offsets = [0];
+    objects.forEach((object, index) => {
+      offsets.push(pdf.length);
+      pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+    });
+    const xrefOffset = pdf.length;
+    pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+    offsets.slice(1).forEach((offset) => {
+      pdf += `${String(offset).padStart(10, "0")} 00000 n \n`;
+    });
+    pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+
+    return new Blob([pdf], { type: "application/pdf" });
+  };
+
+  const buildInvoiceShareText = (order: Order) => {
+    const lines = getInvoiceLines(order);
 
     const itemLines = lines
       .map(
@@ -1151,7 +1722,13 @@ const OrderDesk: React.FC = () => {
               inventory in one flow.
             </Typography>
           </Box>
-          <Stack direction="row" spacing={1.25} flexWrap="wrap" useFlexGap>
+          <Stack
+            direction="row"
+            spacing={1.25}
+            flexWrap="wrap"
+            useFlexGap
+            justifyContent={{ xs: "flex-start", md: "flex-end" }}
+          >
             <Chip
               icon={<ShoppingBag size={16} />}
               label={`${summary.total} Orders`}
@@ -1225,11 +1802,22 @@ const OrderDesk: React.FC = () => {
               <Divider sx={{ mb: 3 }} />
               <form onSubmit={handlePlaceOrder}>
                 <Box sx={{ mb: 3 }}>
-                  <Autocomplete
-                    options={products}
+                  <Autocomplete<ProductOption, false, false, false>
+                    options={productOptions}
                     getOptionLabel={(option) => option.name}
+                    isOptionEqualToValue={(option, value) =>
+                      isCreateProductOption(option) || isCreateProductOption(value)
+                        ? option.id === value.id
+                        : option.id === value.id
+                    }
+                    inputValue={productSearchText}
+                    onInputChange={(_, value) => setProductSearchText(value)}
                     value={selectedProduct}
                     onChange={(_, newValue) => {
+                      if (newValue && isCreateProductOption(newValue)) {
+                        openNewProductDialog();
+                        return;
+                      }
                       setSelectedProduct(newValue);
                       setRate("");
                     }}
@@ -1239,6 +1827,30 @@ const OrderDesk: React.FC = () => {
                         {...props}
                         sx={{ display: "flex", gap: 2 }}
                       >
+                        {isCreateProductOption(option) ? (
+                          <>
+                            <Avatar
+                              variant="rounded"
+                              sx={{
+                                width: 32,
+                                height: 32,
+                                bgcolor: alpha(theme.palette.primary.main, 0.12),
+                                color: "primary.main",
+                              }}
+                            >
+                              <Plus size={18} />
+                            </Avatar>
+                            <Box>
+                              <Typography variant="body2" fontWeight={900}>
+                                Add New Product
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                Create without leaving Order Desk
+                              </Typography>
+                            </Box>
+                          </>
+                        ) : (
+                          <>
                         <Avatar
                           variant="rounded"
                           sx={{
@@ -1258,6 +1870,8 @@ const OrderDesk: React.FC = () => {
                             {option.sku} - {option.stock} in stock
                           </Typography>
                         </Box>
+                          </>
+                        )}
                       </Box>
                     )}
                     renderInput={(params) => (
@@ -1646,7 +2260,7 @@ const OrderDesk: React.FC = () => {
                           <Button
                             key={option.value}
                             type="button"
-                            variant={selected ? "contained" : "outlined"}
+                            variant={ "contained" }
                             startIcon={option.icon}
                             disabled={!canSubmitOrder || transactionLoading}
                             onClick={() => handleStartPayment(option.value)}
@@ -2222,7 +2836,7 @@ const OrderDesk: React.FC = () => {
                 }}
                 id="orders-print-area"
               >
-                <Table sx={{ minWidth: 1260 }}>
+                <Table sx={{ minWidth: 1420 }}>
                   <TableHead>
                     <TableRow>
                       <TableCell sx={{ fontWeight: 700 }}>ORDER ID</TableCell>
@@ -2230,6 +2844,8 @@ const OrderDesk: React.FC = () => {
                       <TableCell sx={{ fontWeight: 700 }}>PRODUCT</TableCell>
                       <TableCell sx={{ fontWeight: 700 }}>QTY</TableCell>
                       <TableCell sx={{ fontWeight: 700 }}>AMOUNT</TableCell>
+                      <TableCell sx={{ fontWeight: 700 }}>PAID</TableCell>
+                      <TableCell sx={{ fontWeight: 700 }}>REMAINING</TableCell>
                       <TableCell sx={{ fontWeight: 700 }}>PAYMENT</TableCell>
                       <TableCell sx={{ fontWeight: 700 }}>STATUS</TableCell>
                       <TableCell sx={{ fontWeight: 700 }}>REASON</TableCell>
@@ -2245,7 +2861,7 @@ const OrderDesk: React.FC = () => {
                   <TableBody>
                     {filteredOrders.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={11}>
+                        <TableCell colSpan={13}>
                           <Box
                             sx={{
                               py: 4,
@@ -2294,6 +2910,38 @@ const OrderDesk: React.FC = () => {
                           <TableCell>
                             <Typography variant="body2" fontWeight={800}>
                               {formatCurrency(order.orderAmount || 0, {
+                                minimumFractionDigits: 0,
+                                maximumFractionDigits: 2,
+                              })}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Typography
+                              variant="body2"
+                              fontWeight={800}
+                              color={
+                                Number(order.paidNow || 0) > 0
+                                  ? "success.main"
+                                  : "text.secondary"
+                              }
+                            >
+                              {formatCurrency(order.paidNow || 0, {
+                                minimumFractionDigits: 0,
+                                maximumFractionDigits: 2,
+                              })}
+                            </Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Typography
+                              variant="body2"
+                              fontWeight={800}
+                              color={
+                                Number(order.dueAmount || 0) > 0
+                                  ? "warning.main"
+                                  : "success.main"
+                              }
+                            >
+                              {formatCurrency(order.dueAmount || 0, {
                                 minimumFractionDigits: 0,
                                 maximumFractionDigits: 2,
                               })}
@@ -2742,23 +3390,7 @@ const OrderDesk: React.FC = () => {
                     Amount
                   </Typography>
                 </Box>
-                {(invoiceOrder.lineItems?.length
-                  ? invoiceOrder.lineItems
-                  : [
-                      {
-                        lineId: invoiceOrder.id,
-                        productId: invoiceOrder.productId,
-                        productName: invoiceOrder.productName,
-                        quantity: invoiceOrder.quantity,
-                        rate:
-                          invoiceOrder.quantity > 0
-                            ? Number(invoiceOrder.orderAmount || 0) /
-                              invoiceOrder.quantity
-                            : 0,
-                        amount: Number(invoiceOrder.orderAmount || 0),
-                      },
-                    ]
-                ).map((line) => (
+                {getInvoiceLines(invoiceOrder).map((line) => (
                   <Box
                     key={line.lineId}
                     sx={{
@@ -2864,6 +3496,14 @@ const OrderDesk: React.FC = () => {
         </DialogContent>
         <DialogActions sx={{ p: 2.5 }}>
           <Button
+            variant="outlined"
+            startIcon={<Download size={18} />}
+            onClick={handleDownloadInvoicePDF}
+            sx={{ fontWeight: 800 }}
+          >
+            Download PDF
+          </Button>
+          <Button
             variant="contained"
             startIcon={<FileDown size={18} />}
             onClick={handlePrintInvoice}
@@ -2881,6 +3521,466 @@ const OrderDesk: React.FC = () => {
           </Button>
           <Button color="inherit" onClick={() => setInvoiceOrder(null)}>
             Close
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={productDialogOpen}
+        onClose={resetProductDialog}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle sx={{ fontWeight: 900 }}>
+          {isManager ? "Add New Product" : "Request New Product"}
+        </DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={3} sx={{ pt: 1 }}>
+            {!isManager && (
+              <Alert severity="info">
+                This product will be sent for approval before it appears in
+                stock.
+              </Alert>
+            )}
+            {productSaveError && (
+              <Alert severity="error">{productSaveError}</Alert>
+            )}
+            <Box>
+              <Typography
+                variant="h6"
+                fontWeight={700}
+                gutterBottom
+                sx={{ display: "flex", alignItems: "center", gap: 1 }}
+              >
+                <Package size={20} /> General Information
+              </Typography>
+              <Divider sx={{ mb: 2.5 }} />
+            </Box>
+            <Grid container spacing={2.5}>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <TextField
+                  fullWidth
+                  required
+                  label="SKU (Unique Identifier)"
+                  value={productForm.sku}
+                  onChange={(event) =>
+                    handleProductFormChange("sku", event.target.value)
+                  }
+                  placeholder="e.g. GRO-ITEM-001"
+                />
+              </Grid>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <TextField
+                  fullWidth
+                  required
+                  label="Product Name"
+                  value={productForm.name}
+                  onChange={(event) =>
+                    handleProductFormChange("name", event.target.value)
+                  }
+                />
+              </Grid>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <TextField
+                  select
+                  fullWidth
+                  required
+                  label="Category"
+                  value={productForm.category}
+                  onChange={(event) =>
+                    handleProductFormChange("category", event.target.value)
+                  }
+                >
+                  {PRODUCT_CATEGORIES.map((category) => (
+                    <MenuItem key={category} value={category}>
+                      {category}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              </Grid>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <TextField
+                  select
+                  fullWidth
+                  required
+                  label="Selling Unit / فروخت کی اکائی"
+                  value={productForm.productUnitCode}
+                  onChange={(event) =>
+                    handleProductFormChange(
+                      "productUnitCode",
+                      event.target.value,
+                    )
+                  }
+                  helperText={`Example display: 10 ${productFormSelectedUnit.english} / ${productFormSelectedUnit.urdu}`}
+                >
+                  {PRODUCT_UNITS.map((unit) => (
+                    <MenuItem key={unit.code} value={unit.code}>
+                      {unit.english} / {unit.urdu}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              </Grid>
+              <Grid size={12}>
+                <TextField
+                  fullWidth
+                  multiline
+                  minRows={3}
+                  label="Description"
+                  value={productForm.description}
+                  onChange={(event) =>
+                    handleProductFormChange("description", event.target.value)
+                  }
+                  placeholder="Enter product features and details..."
+                />
+              </Grid>
+            </Grid>
+
+            <Box>
+              <Typography
+                variant="h6"
+                fontWeight={700}
+                gutterBottom
+                sx={{ display: "flex", alignItems: "center", gap: 1 }}
+              >
+                <Package size={20} /> Stock Details
+              </Typography>
+              <Divider sx={{ mb: 2.5 }} />
+            </Box>
+            <Grid container spacing={2.5}>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <TextField
+                  fullWidth
+                  required
+                  type="number"
+                  label="Purchase Price"
+                  value={productForm.purchasePrice}
+                  onChange={(event) =>
+                    handleProductFormChange("purchasePrice", event.target.value)
+                  }
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        {currencySymbol}
+                      </InputAdornment>
+                    ),
+                  }}
+                />
+              </Grid>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <TextField
+                  fullWidth
+                  required
+                  type="number"
+                  label="Sale Price"
+                  value={productForm.salePrice}
+                  onChange={(event) =>
+                    handleProductFormChange("salePrice", event.target.value)
+                  }
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        {currencySymbol}
+                      </InputAdornment>
+                    ),
+                  }}
+                />
+              </Grid>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <TextField
+                  fullWidth
+                  required
+                  type="number"
+                  label="Initial Stock"
+                  value={productForm.stock}
+                  onChange={(event) =>
+                    handleProductFormChange("stock", event.target.value)
+                  }
+                  helperText={`Stock will be shown as ${productForm.stock || 0} ${productFormSelectedUnit.english} / ${productFormSelectedUnit.urdu}`}
+                />
+              </Grid>
+              <Grid size={{ xs: 12, md: 6 }}>
+                <TextField
+                  fullWidth
+                  required
+                  type="number"
+                  label="Minimum Stock"
+                  value={productForm.minStock}
+                  onChange={(event) =>
+                    handleProductFormChange("minStock", event.target.value)
+                  }
+                  helperText="Alert dashboard when stock drops below this"
+                />
+              </Grid>
+            </Grid>
+
+            <Box>
+              <Typography
+                variant="h6"
+                fontWeight={700}
+                gutterBottom
+                sx={{ display: "flex", alignItems: "center", gap: 1 }}
+              >
+                <ImageIcon size={20} /> Media
+              </Typography>
+              <Divider sx={{ mb: 2.5 }} />
+            </Box>
+            <Grid container spacing={2.5}>
+              <Grid size={12}>
+                <Stack spacing={2}>
+                  <Box
+                    sx={{
+                      display: "flex",
+                      gap: 2,
+                      flexWrap: "wrap",
+                      alignItems: "center",
+                    }}
+                  >
+                    <Button
+                      variant="contained"
+                      startIcon={
+                        productSuggestionsLoading ? (
+                          <CircularProgress size={16} color="inherit" />
+                        ) : (
+                          <Sparkles size={18} />
+                        )
+                      }
+                      onClick={handleProductSuggestionLookup}
+                      disabled={productSuggestionsLoading}
+                    >
+                      {productSuggestionsLoading
+                        ? "Finding images..."
+                        : "Suggest up to 4 images"}
+                    </Button>
+                    <Typography variant="body2" color="text.secondary">
+                      Free image suggestions powered by Open Facts datasets for
+                      groceries, personal care, pet, and general products.
+                    </Typography>
+                  </Box>
+
+                  {productSuggestionError && (
+                    <Alert severity="info">{productSuggestionError}</Alert>
+                  )}
+
+                  {productImageSuggestions.length > 0 && (
+                    <Grid container spacing={2}>
+                      {productImageSuggestions.map((suggestion) => {
+                        const isSelected =
+                          selectedProductSuggestionId === suggestion.id &&
+                          productForm.imageUrl === suggestion.imageUrl;
+
+                        return (
+                          <Grid
+                            key={suggestion.id}
+                            size={{ xs: 12, sm: 6, md: 3 }}
+                          >
+                            <Card
+                              variant="outlined"
+                              sx={{
+                                borderRadius: "8px",
+                                overflow: "hidden",
+                                borderColor: isSelected
+                                  ? "primary.main"
+                                  : "divider",
+                                boxShadow: isSelected ? 3 : 0,
+                              }}
+                            >
+                              <Box
+                                component="img"
+                                src={suggestion.thumbnailUrl || suggestion.imageUrl}
+                                alt={suggestion.title}
+                                sx={{
+                                  width: "100%",
+                                  height: 150,
+                                  objectFit: "contain",
+                                  bgcolor: "grey.50",
+                                  p: 1.5,
+                                }}
+                              />
+                              <CardContent sx={{ p: 2 }}>
+                                <Typography
+                                  variant="subtitle2"
+                                  fontWeight={700}
+                                  noWrap
+                                >
+                                  {suggestion.title}
+                                </Typography>
+                                <Typography
+                                  variant="caption"
+                                  color="text.secondary"
+                                  sx={{ display: "block", minHeight: 34 }}
+                                >
+                                  {suggestion.subtitle || suggestion.brand}
+                                </Typography>
+                                <Button
+                                  fullWidth
+                                  variant={isSelected ? "contained" : "outlined"}
+                                  size="small"
+                                  startIcon={
+                                    isSelected ? (
+                                      <Check size={16} />
+                                    ) : (
+                                      <ImageIcon size={16} />
+                                    )
+                                  }
+                                  onClick={() =>
+                                    handleSelectProductSuggestion(suggestion)
+                                  }
+                                  sx={{ mt: 1.5 }}
+                                >
+                                  {isSelected ? "Selected" : "Use this image"}
+                                </Button>
+                              </CardContent>
+                            </Card>
+                          </Grid>
+                        );
+                      })}
+                    </Grid>
+                  )}
+
+                  <Box
+                    onClick={() => productFileInputRef.current?.click()}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={handleProductImageDrop}
+                    sx={{
+                      border: "2px dashed",
+                      borderColor: "divider",
+                      borderRadius: "8px",
+                      p: 4,
+                      textAlign: "center",
+                      bgcolor: alpha(theme.palette.primary.main, 0.03),
+                      cursor: "pointer",
+                      "&:hover": {
+                        bgcolor: alpha(theme.palette.primary.main, 0.06),
+                      },
+                    }}
+                  >
+                    <Upload
+                      size={44}
+                      color={theme.palette.text.secondary}
+                      style={{ marginBottom: 12 }}
+                    />
+                    <Typography variant="body1" fontWeight={700}>
+                      Drag and drop an image, or click to browse
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      JPG, PNG, WEBP up to 1.5 MB. Stored directly with the
+                      product for now.
+                    </Typography>
+                    <input
+                      ref={productFileInputRef}
+                      type="file"
+                      accept="image/*"
+                      hidden
+                      onChange={handleProductFileInputChange}
+                    />
+                  </Box>
+
+                  <Box
+                    sx={{
+                      display: "flex",
+                      gap: 2,
+                      flexWrap: "wrap",
+                      alignItems: "flex-start",
+                    }}
+                  >
+                    <TextField
+                      fullWidth
+                      label="Or paste an image URL"
+                      placeholder="https://example.com/product-image.jpg"
+                      value={productImageUrlInput}
+                      onChange={(event) =>
+                        setProductImageUrlInput(event.target.value)
+                      }
+                    />
+                    <Button
+                      variant="outlined"
+                      startIcon={<LinkIcon size={18} />}
+                      onClick={handleUseProductImageUrl}
+                      sx={{ minWidth: 160, height: 40 }}
+                    >
+                      Use image URL
+                    </Button>
+                  </Box>
+
+                  {productImageError && (
+                    <Alert severity="warning">{productImageError}</Alert>
+                  )}
+
+                  {productForm.imageUrl && (
+                    <Card variant="outlined" sx={{ borderRadius: "8px" }}>
+                      <CardContent sx={{ p: 2.5 }}>
+                        <Box
+                          sx={{
+                            display: "flex",
+                            gap: 2,
+                            flexWrap: "wrap",
+                            alignItems: "center",
+                          }}
+                        >
+                          <Box
+                            component="img"
+                            src={productForm.imageUrl}
+                            alt={productForm.name || "Selected product image"}
+                            sx={{
+                              width: 120,
+                              height: 120,
+                              objectFit: "contain",
+                              bgcolor: "grey.50",
+                              borderRadius: "8px",
+                              p: 1,
+                            }}
+                          />
+                          <Box sx={{ flex: 1, minWidth: 220 }}>
+                            <Typography variant="subtitle1" fontWeight={700}>
+                              Selected product image
+                            </Typography>
+                            <Typography
+                              variant="body2"
+                              color="text.secondary"
+                              sx={{ wordBreak: "break-all" }}
+                            >
+                              {productForm.imageUrl.startsWith("data:")
+                                ? "Uploaded from your device"
+                                : productForm.imageUrl}
+                            </Typography>
+                          </Box>
+                          <Button
+                            color="error"
+                            variant="text"
+                            startIcon={<Trash2 size={18} />}
+                            onClick={clearProductImage}
+                          >
+                            Remove
+                          </Button>
+                        </Box>
+                      </CardContent>
+                    </Card>
+                  )}
+                </Stack>
+              </Grid>
+            </Grid>
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ p: 2.5 }}>
+          <Button
+            color="inherit"
+            onClick={resetProductDialog}
+            disabled={productSaving}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<Package size={18} />}
+            onClick={handleCreateProduct}
+            disabled={productSaving}
+            sx={{ fontWeight: 800 }}
+          >
+            {productSaving
+              ? "Saving..."
+              : isManager
+                ? "Save & Select"
+                : "Submit Request"}
           </Button>
         </DialogActions>
       </Dialog>
