@@ -14,6 +14,8 @@ import { useDispatch } from 'react-redux';
 import type { AppDispatch } from './store';
 import { fetchSettings } from './features/settings/settingsSlice';
 import { logout } from './features/auth/authSlice';
+import { subscribeApiLoading } from './api/axios';
+import ModernLoader from './components/Common/ModernLoader';
 
 // Lazy load pages for better performance
 import Login from './pages/Auth/Login';
@@ -42,6 +44,7 @@ const AppContent: React.FC = () => {
   const dispatch = useDispatch<AppDispatch>();
   const { mode } = useSelector((state: RootState) => state.theme);
   const { isAuthenticated } = useSelector((state: RootState) => state.auth);
+  const [apiLoading, setApiLoading] = React.useState(false);
   const theme = React.useMemo(() => getAppTheme(mode), [mode]);
 
   useEffect(() => {
@@ -56,8 +59,11 @@ const AppContent: React.FC = () => {
     return () => window.removeEventListener('itemhive-auth-expired', handleAuthExpired);
   }, [dispatch]);
 
+  useEffect(() => subscribeApiLoading(setApiLoading), []);
+
   return (
     <ThemeProvider theme={theme}>
+      {apiLoading && <ModernLoader />}
       <BrowserRouter>
         <ScrollToTop />
         <React.Suspense fallback={<div>Loading...</div>}>

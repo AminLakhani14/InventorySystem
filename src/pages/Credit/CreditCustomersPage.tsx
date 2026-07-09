@@ -264,7 +264,7 @@ const CreditCustomersPage: React.FC = () => {
                             <TableHead>
                                 <TableRow>
                                     <TableCell sx={{ fontWeight: 700 }}>CUSTOMER</TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }}>{regionalIdLabel.toUpperCase()}</TableCell>
+                                    {/* <TableCell sx={{ fontWeight: 700 }}>{regionalIdLabel.toUpperCase()}</TableCell> */}
                                     <TableCell sx={{ fontWeight: 700 }}>INVOICES</TableCell>
                                     <TableCell sx={{ fontWeight: 700 }}>CREDIT ISSUED</TableCell>
                                     <TableCell sx={{ fontWeight: 700 }}>RECOVERED</TableCell>
