@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: itemhive-backend
+    name: inventorysystem-backend
     runtime: node
     plan: free
     rootDir: backend
