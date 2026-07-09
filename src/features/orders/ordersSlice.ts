@@ -53,8 +53,11 @@ const ordersSlice = createSlice({
                 order.status = action.payload.status;
             }
         },
+        removeOrder: (state, action: PayloadAction<string>) => {
+            state.orders = state.orders.filter(o => o.id !== action.payload);
+        },
     },
 });
 
-export const { addOrder, updateOrderStatus } = ordersSlice.actions;
+export const { addOrder, updateOrderStatus, removeOrder } = ordersSlice.actions;
 export default ordersSlice.reducer;

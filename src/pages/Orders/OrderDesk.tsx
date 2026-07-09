@@ -54,6 +54,7 @@ import { useDispatch, useSelector } from "react-redux";
 import type { RootState } from "../../store";
 import {
   addOrder,
+  removeOrder,
   type OrderStatus,
   type Order,
   type OrderPaymentMethod,
@@ -72,6 +73,7 @@ import {
 import {
   addTransactionApi,
   fetchTransactions,
+  deleteTransactionsApi,
 } from "../../features/transactions/transactionSlice";
 import { alpha, useTheme } from "@mui/material/styles";
 import type { AppDispatch } from "../../store";
@@ -283,6 +285,11 @@ const OrderDesk: React.FC = () => {
   } | null>(null);
   const [filterText, setFilterText] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | OrderStatus>("all");
+  const [orderPendingDelete, setOrderPendingDelete] = useState<Order | null>(
+    null,
+  );
+  const [deleteAllConfirmOpen, setDeleteAllConfirmOpen] = useState(false);
+  const [deletingOrders, setDeletingOrders] = useState(false);
 
   useEffect(() => {
     dispatch(fetchProducts());
@@ -1194,6 +1201,80 @@ const OrderDesk: React.FC = () => {
       );
     });
   }, [orders, fulfilledOrdersFromTransactions, filterText, statusFilter]);
+
+  const getOrderTransactionIds = (order: Order) =>
+    order.lineItems && order.lineItems.length > 0
+      ? order.lineItems.map((line) => line.lineId)
+      : [order.id];
+
+  const handleConfirmDeleteOrder = async () => {
+    if (!orderPendingDelete) return;
+
+    if (orderPendingDelete.status !== "fulfilled") {
+      dispatch(removeOrder(orderPendingDelete.id));
+      setOrderPendingDelete(null);
+      return;
+    }
+
+    setDeletingOrders(true);
+    try {
+      await dispatch(
+        deleteTransactionsApi({
+          ids: getOrderTransactionIds(orderPendingDelete),
+          restoreStock: true,
+        }),
+      ).unwrap();
+      setFeedback({
+        type: "success",
+        message: `Order ${orderPendingDelete.id} deleted and stock restored.`,
+      });
+      setOrderPendingDelete(null);
+    } catch (deleteError) {
+      setFeedback({
+        type: "error",
+        message:
+          typeof deleteError === "string"
+            ? deleteError
+            : getApiErrorMessage(deleteError, "Failed to delete order."),
+      });
+    } finally {
+      setDeletingOrders(false);
+    }
+  };
+
+  const handleConfirmDeleteAllOrders = async () => {
+    const localOnlyIds = filteredOrders
+      .filter((order) => order.status !== "fulfilled")
+      .map((order) => order.id);
+    const transactionIds = filteredOrders
+      .filter((order) => order.status === "fulfilled")
+      .flatMap(getOrderTransactionIds);
+
+    setDeletingOrders(true);
+    try {
+      localOnlyIds.forEach((id) => dispatch(removeOrder(id)));
+      if (transactionIds.length > 0) {
+        await dispatch(
+          deleteTransactionsApi({ ids: transactionIds, restoreStock: true }),
+        ).unwrap();
+      }
+      setFeedback({
+        type: "success",
+        message: `${filteredOrders.length} order(s) deleted and stock restored.`,
+      });
+      setDeleteAllConfirmOpen(false);
+    } catch (deleteError) {
+      setFeedback({
+        type: "error",
+        message:
+          typeof deleteError === "string"
+            ? deleteError
+            : getApiErrorMessage(deleteError, "Failed to delete orders."),
+      });
+    } finally {
+      setDeletingOrders(false);
+    }
+  };
 
   const selectedCustomerPreviousOrders = useMemo(() => {
     if (!selectedCustomer) return [];
@@ -2826,6 +2907,16 @@ const OrderDesk: React.FC = () => {
                 >
                   Print PDF
                 </Button>
+                <Button
+                  variant="outlined"
+                  color="error"
+                  disabled={filteredOrders.length === 0}
+                  startIcon={<Trash2 size={18} />}
+                  onClick={() => setDeleteAllConfirmOpen(true)}
+                  sx={{ whiteSpace: "nowrap" }}
+                >
+                  Delete All
+                </Button>
               </Box>
               <TableContainer
                 sx={{
@@ -2999,15 +3090,31 @@ const OrderDesk: React.FC = () => {
                             </Typography>
                           </TableCell>
                           <TableCell align="right">
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              startIcon={<ReceiptText size={16} />}
-                              onClick={() => setInvoiceOrder(order)}
-                              sx={{ fontWeight: 800, whiteSpace: "nowrap" }}
+                            <Stack
+                              direction="row"
+                              spacing={1}
+                              justifyContent="flex-end"
                             >
-                              Invoice
-                            </Button>
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                startIcon={<ReceiptText size={16} />}
+                                onClick={() => setInvoiceOrder(order)}
+                                sx={{ fontWeight: 800, whiteSpace: "nowrap" }}
+                              >
+                                Invoice
+                              </Button>
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                color="error"
+                                startIcon={<Trash2 size={16} />}
+                                onClick={() => setOrderPendingDelete(order)}
+                                sx={{ fontWeight: 800, whiteSpace: "nowrap" }}
+                              >
+                                Delete
+                              </Button>
+                            </Stack>
                           </TableCell>
                         </TableRow>
                       ))
@@ -3521,6 +3628,108 @@ const OrderDesk: React.FC = () => {
           </Button>
           <Button color="inherit" onClick={() => setInvoiceOrder(null)}>
             Close
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(orderPendingDelete)}
+        onClose={() => (deletingOrders ? null : setOrderPendingDelete(null))}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle sx={{ fontWeight: 900 }}>Delete Order?</DialogTitle>
+        <DialogContent dividers>
+          {orderPendingDelete && (
+            <Stack spacing={1.5}>
+              <Typography variant="body2">
+                This will permanently delete order{" "}
+                <strong>#{orderPendingDelete.id}</strong>
+                {orderPendingDelete.status === "fulfilled"
+                  ? " and restore the stock quantity that was deducted for it."
+                  : "."}
+              </Typography>
+              {orderPendingDelete.status === "fulfilled" &&
+                orderPendingDelete.paymentMethod === "credit" && (
+                  <Alert severity="warning" sx={{ borderRadius: "8px" }}>
+                    If this customer has no other credit orders left after
+                    this deletion, their credit payment history will be
+                    cleared too.
+                  </Alert>
+                )}
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                fontWeight={700}
+              >
+                This action cannot be undone.
+              </Typography>
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ p: 2.5 }}>
+          <Button
+            color="inherit"
+            onClick={() => setOrderPendingDelete(null)}
+            disabled={deletingOrders}
+          >
+            Cancel
+          </Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={handleConfirmDeleteOrder}
+            disabled={deletingOrders}
+          >
+            {deletingOrders ? "Deleting..." : "Delete Order"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={deleteAllConfirmOpen}
+        onClose={() => (deletingOrders ? null : setDeleteAllConfirmOpen(false))}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle sx={{ fontWeight: 900 }}>Delete All Orders?</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={1.5}>
+            <Typography variant="body2">
+              This will permanently delete all <strong>{filteredOrders.length}</strong>{" "}
+              order(s) currently shown and restore any stock quantities that
+              were deducted for fulfilled orders.
+            </Typography>
+            <Alert severity="warning" sx={{ borderRadius: "8px" }}>
+              Credit payment history for customers left with no remaining
+              credit orders will also be cleared.
+            </Alert>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              fontWeight={700}
+            >
+              This action cannot be undone.
+            </Typography>
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ p: 2.5 }}>
+          <Button
+            color="inherit"
+            onClick={() => setDeleteAllConfirmOpen(false)}
+            disabled={deletingOrders}
+          >
+            Cancel
+          </Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={handleConfirmDeleteAllOrders}
+            disabled={deletingOrders}
+          >
+            {deletingOrders
+              ? "Deleting..."
+              : `Delete ${filteredOrders.length} Order(s)`}
           </Button>
         </DialogActions>
       </Dialog>
