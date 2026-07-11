@@ -1068,6 +1068,15 @@ const OrderDesk: React.FC = () => {
     const timestamp = new Date().toISOString();
     const requestedBy = user?.name || "Admin";
 
+    // Credit snapshot at order time. These are order-level figures, so they are
+    // stored on the first line only and summed back during reconstruction.
+    const isCreditOrder = confirmedPaymentMethod === "credit";
+    const orderPreviousCredit = isCreditOrder ? selectedCustomerCreditBalance : 0;
+    const orderCreditPaid = isCreditOrder ? confirmedPreviousAdjustment : 0;
+    const orderClosingCredit = isCreditOrder
+      ? Math.max(orderPreviousCredit - orderCreditPaid, 0) + confirmedDueAmount
+      : 0;
+
     const results = [];
     for (const [index, line] of orderLinesForSubmit.entries()) {
       const orderTx = {
@@ -1092,6 +1101,9 @@ const OrderDesk: React.FC = () => {
           currentOrderTotal > 0
             ? Number(((line.amount / currentOrderTotal) * confirmedDueAmount).toFixed(2))
             : 0,
+        previousCredit: index === 0 ? orderPreviousCredit : 0,
+        creditPaid: index === 0 ? orderCreditPaid : 0,
+        closingCredit: index === 0 ? orderClosingCredit : 0,
       };
       results.push(await dispatch(addTransactionApi(orderTx)));
     }
@@ -1136,6 +1148,9 @@ const OrderDesk: React.FC = () => {
           paymentMethod: confirmedPaymentMethod,
           paidNow: confirmedPaidNow,
           dueAmount: confirmedDueAmount,
+          previousCredit: orderPreviousCredit,
+          creditPaid: orderCreditPaid,
+          closingCredit: orderClosingCredit,
         }),
       );
       dispatch(fetchProducts());
@@ -1271,6 +1286,9 @@ const OrderDesk: React.FC = () => {
             paymentMethod: tx.paymentMethod || "cash",
             paidNow: Number(tx.paidNow || 0),
             dueAmount: Number(tx.dueAmount || 0),
+            previousCredit: Number(tx.previousCredit || 0),
+            creditPaid: Number(tx.creditPaid || 0),
+            closingCredit: Number(tx.closingCredit || 0),
           });
           return;
         }
@@ -1281,6 +1299,10 @@ const OrderDesk: React.FC = () => {
         existing.orderAmount = Number(existing.orderAmount || 0) + lineAmount;
         existing.paidNow = Number(existing.paidNow || 0) + Number(tx.paidNow || 0);
         existing.dueAmount = Number(existing.dueAmount || 0) + Number(tx.dueAmount || 0);
+        // Credit snapshot lives on a single line, so summing recovers the order-level value.
+        existing.previousCredit = Number(existing.previousCredit || 0) + Number(tx.previousCredit || 0);
+        existing.creditPaid = Number(existing.creditPaid || 0) + Number(tx.creditPaid || 0);
+        existing.closingCredit = Number(existing.closingCredit || 0) + Number(tx.closingCredit || 0);
       });
 
     return Array.from(grouped.values()).map((order) => ({
@@ -1553,6 +1575,14 @@ const OrderDesk: React.FC = () => {
           },
         ];
 
+  // Only credit orders that actually carry a snapshot should show the credit
+  // breakdown — this hides an all-zero block on cash orders and pre-snapshot ones.
+  const hasCreditSnapshot = (order: Order) =>
+    order.paymentMethod === "credit" &&
+    (Number(order.previousCredit || 0) > 0 ||
+      Number(order.creditPaid || 0) > 0 ||
+      Number(order.closingCredit || 0) > 0);
+
   const escapeHtml = (value: unknown) =>
     String(value ?? "")
       .replace(/&/g, "&amp;")
@@ -1628,6 +1658,14 @@ const OrderDesk: React.FC = () => {
               <div class="total-row"><span>Total</span><strong>${escapeHtml(formatCurrency(order.orderAmount || 0, { minimumFractionDigits: 0, maximumFractionDigits: 2 }))}</strong></div>
               <div class="total-row"><span>Paid Now</span><strong>${escapeHtml(formatCurrency(order.paidNow || 0, { minimumFractionDigits: 0, maximumFractionDigits: 2 }))}</strong></div>
               <div class="total-row"><span>Amount To Receive</span><strong>${escapeHtml(formatCurrency(order.dueAmount || 0, { minimumFractionDigits: 0, maximumFractionDigits: 2 }))}</strong></div>
+              ${
+                hasCreditSnapshot(order)
+                  ? `
+              <div class="total-row" style="border-top:2px solid #e5e7eb;margin-top:6px"><span>Previous Credit</span><strong>${escapeHtml(formatCurrency(order.previousCredit || 0, { minimumFractionDigits: 0, maximumFractionDigits: 2 }))}</strong></div>
+              <div class="total-row"><span>Paid Toward Credit</span><strong>${escapeHtml(formatCurrency(order.creditPaid || 0, { minimumFractionDigits: 0, maximumFractionDigits: 2 }))}</strong></div>
+              <div class="total-row"><span>Closing Credit</span><strong>${escapeHtml(formatCurrency(order.closingCredit || 0, { minimumFractionDigits: 0, maximumFractionDigits: 2 }))}</strong></div>`
+                  : ""
+              }
             </div>
             ${order.notes ? `<div class="note">${escapeHtml(order.notes)}</div>` : ""}
           </section>
@@ -1766,7 +1804,9 @@ const OrderDesk: React.FC = () => {
     });
 
     const totalsTop = Math.max(rowY - 14, 250);
-    commands.push(rect(335, totalsTop - 94, 220, 94, "1 1 1 rg", "0.88 0.9 0.94 RG"));
+    const isCreditInvoice = hasCreditSnapshot(order);
+    const totalsBoxHeight = isCreditInvoice ? 178 : 94;
+    commands.push(rect(335, totalsTop - totalsBoxHeight, 220, totalsBoxHeight, "1 1 1 rg", "0.88 0.9 0.94 RG"));
     commands.push(text("Total", 355, totalsTop - 24, 10));
     commands.push(rightText(formatCurrency(order.orderAmount || 0, { minimumFractionDigits: 0, maximumFractionDigits: 2 }), 532, totalsTop - 24, 11, true));
     commands.push(line(355, totalsTop - 38, 535, totalsTop - 38));
@@ -1775,6 +1815,15 @@ const OrderDesk: React.FC = () => {
     commands.push(line(355, totalsTop - 68, 535, totalsTop - 68));
     commands.push(text("Amount To Receive", 355, totalsTop - 84, 10, true));
     commands.push(rightText(formatCurrency(order.dueAmount || 0, { minimumFractionDigits: 0, maximumFractionDigits: 2 }), 532, totalsTop - 84, 12, true));
+    if (isCreditInvoice) {
+      commands.push(line(355, totalsTop - 98, 535, totalsTop - 98));
+      commands.push(text("Previous Credit", 355, totalsTop - 114, 9));
+      commands.push(rightText(formatCurrency(order.previousCredit || 0, { minimumFractionDigits: 0, maximumFractionDigits: 2 }), 532, totalsTop - 114, 10, true));
+      commands.push(text("Paid Toward Credit", 355, totalsTop - 136, 9));
+      commands.push(rightText(formatCurrency(order.creditPaid || 0, { minimumFractionDigits: 0, maximumFractionDigits: 2 }), 532, totalsTop - 136, 10, true));
+      commands.push(text("Closing Credit", 355, totalsTop - 158, 9, true));
+      commands.push(rightText(formatCurrency(order.closingCredit || 0, { minimumFractionDigits: 0, maximumFractionDigits: 2 }), 532, totalsTop - 158, 11, true));
+    }
 
     if (order.notes) {
       commands.push(rect(40, totalsTop - 94, 270, 54, "0.91 0.98 0.98 rg", themeHeaderStrokeRgb));
@@ -1820,6 +1869,15 @@ const OrderDesk: React.FC = () => {
       )
       .join("\n");
 
+    const creditLines =
+      hasCreditSnapshot(order)
+        ? [
+            `Previous Credit: ${formatCurrency(order.previousCredit || 0, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`,
+            `Paid Toward Credit: ${formatCurrency(order.creditPaid || 0, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`,
+            `Closing Credit: ${formatCurrency(order.closingCredit || 0, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`,
+          ]
+        : [];
+
     return [
       `Order Invoice #${order.id}`,
       `Date: ${new Date(order.timestamp).toLocaleString()}`,
@@ -1832,6 +1890,7 @@ const OrderDesk: React.FC = () => {
       `Total: ${formatCurrency(order.orderAmount || 0, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`,
       `Paid Now: ${formatCurrency(order.paidNow || 0, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`,
       `Amount To Receive: ${formatCurrency(order.dueAmount || 0, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`,
+      ...creditLines,
     ].join("\n");
   };
 
@@ -3695,6 +3754,58 @@ const OrderDesk: React.FC = () => {
                   </Typography>
                 </Box>
               </Stack>
+
+              {hasCreditSnapshot(invoiceOrder) && (
+                <>
+                  <Divider textAlign="left">
+                    <Typography variant="caption" color="text.secondary" fontWeight={800}>
+                      CREDIT ACCOUNT
+                    </Typography>
+                  </Divider>
+                  <Stack spacing={1}>
+                    <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                      <Typography color="text.secondary">
+                        Previous Credit
+                      </Typography>
+                      <Typography fontWeight={800}>
+                        {formatCurrency(invoiceOrder.previousCredit || 0, {
+                          minimumFractionDigits: 0,
+                          maximumFractionDigits: 2,
+                        })}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                      <Typography color="text.secondary">
+                        Paid Toward Credit
+                      </Typography>
+                      <Typography fontWeight={800} color="success.main">
+                        {formatCurrency(invoiceOrder.creditPaid || 0, {
+                          minimumFractionDigits: 0,
+                          maximumFractionDigits: 2,
+                        })}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ display: "flex", justifyContent: "space-between" }}>
+                      <Typography color="text.secondary">
+                        Closing Credit
+                      </Typography>
+                      <Typography
+                        fontWeight={900}
+                        color={
+                          (invoiceOrder.closingCredit || 0) > 0
+                            ? "warning.main"
+                            : "success.main"
+                        }
+                      >
+                        {formatCurrency(invoiceOrder.closingCredit || 0, {
+                          minimumFractionDigits: 0,
+                          maximumFractionDigits: 2,
+                        })}
+                      </Typography>
+                    </Box>
+                  </Stack>
+                </>
+              )}
 
               {invoiceOrder.notes && (
                 <Alert

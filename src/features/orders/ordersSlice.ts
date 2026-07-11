@@ -30,6 +30,10 @@ export interface Order {
     paymentMethod?: OrderPaymentMethod;
     paidNow?: number;
     dueAmount?: number;
+    // Credit snapshot captured at order time (only set for credit orders)
+    previousCredit?: number;
+    creditPaid?: number;
+    closingCredit?: number;
 }
 
 interface OrdersState {

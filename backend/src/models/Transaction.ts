@@ -13,6 +13,10 @@ export interface ITransaction extends Document {
     paidVia?: 'cash' | 'card';
     paidNow?: number;
     dueAmount?: number;
+    // Credit snapshot captured at order time (order-level; stored on the first line only)
+    previousCredit?: number;
+    creditPaid?: number;
+    closingCredit?: number;
     customerName?: string;
     customerCnic?: string;
     unitCost?: number;
@@ -35,6 +39,9 @@ const TransactionSchema: Schema = new Schema({
     paidVia: { type: String, enum: ['cash', 'card'], default: undefined },
     paidNow: { type: Number, default: 0 },
     dueAmount: { type: Number, default: 0 },
+    previousCredit: { type: Number, default: 0 },
+    creditPaid: { type: Number, default: 0 },
+    closingCredit: { type: Number, default: 0 },
     customerName: { type: String, default: '' },
     customerCnic: { type: String, default: '' },
     unitCost: { type: Number, default: 0 },

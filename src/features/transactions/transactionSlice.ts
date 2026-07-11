@@ -15,6 +15,9 @@ export interface Transaction {
     paidVia?: 'cash' | 'card';
     paidNow?: number;
     dueAmount?: number;
+    previousCredit?: number;
+    creditPaid?: number;
+    closingCredit?: number;
     customerName?: string;
     customerCnic?: string;
     unitCost?: number;
