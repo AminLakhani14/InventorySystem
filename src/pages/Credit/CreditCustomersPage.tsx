@@ -29,6 +29,7 @@ import useAppCurrency from '../../hooks/useAppCurrency';
 import { useSelector } from 'react-redux';
 import type { RootState } from '../../store';
 import { getRegionalIdLabel } from '../../lib/regional';
+import AppDatePicker from '../../components/Common/AppDatePicker';
 
 interface CreditCustomer {
     customerName: string;
@@ -446,14 +447,7 @@ const CreditCustomersPage: React.FC = () => {
                                 }}
                             />
 
-                            <TextField
-                                fullWidth
-                                type="date"
-                                label="Payment Date"
-                                InputLabelProps={{ shrink: true }}
-                                value={paymentDate}
-                                onChange={(e) => setPaymentDate(e.target.value)}
-                            />
+                            <AppDatePicker fullWidth label="Payment Date" value={paymentDate} onChange={setPaymentDate} />
 
                             <TextField
                                 select
@@ -471,16 +465,7 @@ const CreditCustomersPage: React.FC = () => {
                                     <Typography variant="body2" color="warning.main" fontWeight={800} sx={{ mb: 1 }}>
                                         {formatCurrency(remainingAfterPayment, { minimumFractionDigits: 0, maximumFractionDigits: 2 })} will still be outstanding. When will it be paid?
                                     </Typography>
-                                    <TextField
-                                        fullWidth
-                                        type="date"
-                                        label="Remaining Amount Due Date"
-                                        InputLabelProps={{ shrink: true }}
-                                        value={nextDueDate}
-                                        onChange={(e) => setNextDueDate(e.target.value)}
-                                        inputProps={{ min: paymentDate }}
-                                        required
-                                    />
+                                    <AppDatePicker fullWidth required label="Remaining Amount Due Date" value={nextDueDate} onChange={setNextDueDate} minDate={paymentDate} />
                                 </Box>
                             )}
 

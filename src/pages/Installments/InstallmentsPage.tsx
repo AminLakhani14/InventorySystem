@@ -27,6 +27,7 @@ import useAppCurrency from '../../hooks/useAppCurrency';
 import { useSelector } from 'react-redux';
 import type { RootState } from '../../store';
 import { getRegionalIdLabel } from '../../lib/regional';
+import AppDatePicker from '../../components/Common/AppDatePicker';
 
 interface InstallmentScheduleItem {
     installmentNumber: number;
@@ -339,14 +340,7 @@ const InstallmentsPage: React.FC = () => {
                                             startAdornment: <InputAdornment position="start">{currencySymbol}</InputAdornment>,
                                         }}
                                     />
-                                    <TextField
-                                        fullWidth
-                                        type="date"
-                                        label="Payment Date"
-                                        InputLabelProps={{ shrink: true }}
-                                        value={balancePaymentDate}
-                                        onChange={(e) => setBalancePaymentDate(e.target.value)}
-                                    />
+                                    <AppDatePicker fullWidth label="Payment Date" value={balancePaymentDate} onChange={setBalancePaymentDate} />
                                 </>
                             ) : (
                                 <TextField

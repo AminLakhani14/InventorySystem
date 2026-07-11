@@ -39,6 +39,7 @@ import {
 } from "../../features/transactions/transactionSlice";
 import useAppCurrency from "../../hooks/useAppCurrency";
 import api from "../../api/axios";
+import AppDatePicker from "../../components/Common/AppDatePicker";
 
 type CreditCustomer = {
   customerName: string;
@@ -494,22 +495,8 @@ const CustomerRecordsPage: React.FC = () => {
                 }}
                 sx={{ minWidth: { xs: "100%", sm: 300 } }}
               />
-              <TextField
-                size="small"
-                type="date"
-                label="From"
-                InputLabelProps={{ shrink: true }}
-                value={fromDate}
-                onChange={(event) => setFromDate(event.target.value)}
-              />
-              <TextField
-                size="small"
-                type="date"
-                label="To"
-                InputLabelProps={{ shrink: true }}
-                value={toDate}
-                onChange={(event) => setToDate(event.target.value)}
-              />
+              <AppDatePicker size="small" label="From" value={fromDate} onChange={setFromDate} maxDate={toDate || undefined} />
+              <AppDatePicker size="small" label="To" value={toDate} onChange={setToDate} minDate={fromDate || undefined} />
               {(fromDate || toDate) && (
                 <Button
                   size="small"

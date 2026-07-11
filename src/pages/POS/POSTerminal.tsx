@@ -47,6 +47,7 @@ import type { AppDispatch } from '../../store';
 import { motion, AnimatePresence } from 'framer-motion';
 import useAppCurrency from '../../hooks/useAppCurrency';
 import api from '../../api/axios';
+import AppDatePicker from '../../components/Common/AppDatePicker';
 import { getRegionalIdLabel } from '../../lib/regional';
 import { DEFAULT_APP_SETTINGS } from '../../features/settings/settingsSlice';
 
@@ -1068,14 +1069,7 @@ const POSTerminal: React.FC = () => {
                             />
                         </Grid>
                         <Grid size={{ xs: 12, md: 6 }}>
-                            <TextField
-                                fullWidth
-                                type="date"
-                                label="Sale Date"
-                                InputLabelProps={{ shrink: true }}
-                                value={installmentSaleDate}
-                                onChange={(e) => setInstallmentSaleDate(e.target.value)}
-                            />
+                            <AppDatePicker fullWidth label="Sale Date" value={installmentSaleDate} onChange={setInstallmentSaleDate} />
                         </Grid>
                         <Grid size={{ xs: 12, md: 6 }}>
                             <Box sx={{ p: 2, borderRadius: 2, bgcolor: 'action.hover', border: '1px solid', borderColor: 'divider' }}>

@@ -282,3 +282,27 @@ export const getCollectionsDashboard = async (req: AuthRequest, res: Response) =
         res.status(500).json({ message: error.message || 'Failed to load collections dashboard' });
     }
 };
+
+export const getCollectionCustomerDetails = async (req: AuthRequest, res: Response) => {
+    try {
+        const selectedDate = typeof req.query.date === 'string' ? new Date(req.query.date) : new Date();
+        const customerName = String(req.query.customerName || '').trim();
+        const customerCnic = String(req.query.customerCnic || '').trim();
+        if (!customerName) return res.status(400).json({ message: 'Customer name is required' });
+        const range = { $gte: startOfDay(selectedDate), $lte: endOfDay(selectedDate) };
+        const tenant = buildTenantFilter(req.user!);
+        const customerFilter = customerName === 'Walk-in Customer'
+            ? { customerName: { $in: ['', null] } }
+            : { customerName, customerCnic };
+        const [sales, payments] = await Promise.all([
+            Transaction.find({ ...tenant, ...customerFilter, type: 'reduction', timestamp: range }).sort({ timestamp: -1 }).lean(),
+            customerName === 'Walk-in Customer' ? [] : CreditPayment.find({ ...tenant, customerName, customerCnic, timestamp: range }).sort({ timestamp: -1 }).lean(),
+        ]);
+        res.json([
+            ...sales.map((sale) => ({ id: sale._id, timestamp: sale.timestamp, recordType: 'sale', description: sale.productName, paymentMethod: sale.paymentMethod, amount: sale.paymentMethod === 'credit' ? Number(sale.paidNow || 0) : Number(sale.totalPrice || 0), saleAmount: sale.totalPrice })),
+            ...payments.map((payment) => ({ id: payment._id, timestamp: payment.timestamp, recordType: 'recovery', description: payment.notes || 'Credit payment received', paymentMethod: payment.paidVia, amount: Number(payment.receivedAmount ?? payment.amount ?? 0), saleAmount: 0 })),
+        ].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
+    } catch (error: any) {
+        res.status(500).json({ message: error.message || 'Failed to load customer collection details' });
+    }
+};

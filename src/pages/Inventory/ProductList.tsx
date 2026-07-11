@@ -61,6 +61,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { alpha, useTheme, styled } from '@mui/material/styles';
 import { motion } from 'framer-motion';
 import { DEFAULT_PRODUCT_UNIT, getProductUnit, getProductUnitLabel, PRODUCT_UNITS } from '../../lib/productUnits';
+import AppDatePicker from '../../components/Common/AppDatePicker';
 
 const IconContainer = styled(Box)<{ color?: string }>(({ theme, color }) => ({
     width: 44,
@@ -977,19 +978,7 @@ const ProductList: React.FC = () => {
                                     />
                                 </Grid>
                                 <Grid size={{ xs: 12, md: 4 }}>
-                                    <TextField
-                                        fullWidth
-                                        label="Expiry Date"
-                                        type="date"
-                                        InputLabelProps={{ shrink: true }}
-                                        value={editProduct.expiryDate || ''}
-                                        onChange={(e) =>
-                                            setEditProduct({
-                                                ...editProduct,
-                                                expiryDate: e.target.value,
-                                            })
-                                        }
-                                    />
+                                    <AppDatePicker fullWidth label="Expiry Date" value={editProduct.expiryDate || ''} onChange={(value) => setEditProduct({ ...editProduct, expiryDate: value })} />
                                 </Grid>
                                 <Grid size={{ xs: 12, md: 4 }}>
                                     <TextField
@@ -1176,16 +1165,7 @@ const ProductList: React.FC = () => {
                                         />
                                     </Grid>
                                     <Grid size={12}>
-                                        <TextField
-                                            fullWidth
-                                            label="Expiry Date"
-                                            name="expiryDate"
-                                            type="date"
-                                            InputLabelProps={{ shrink: true }}
-                                            value={addFormData.expiryDate}
-                                            onChange={handleAddChange}
-                                            InputProps={{ sx: { borderRadius: 3 } }}
-                                        />
+                                        <AppDatePicker fullWidth label="Expiry Date" value={addFormData.expiryDate} onChange={(value) => setAddFormData({ ...addFormData, expiryDate: value })} />
                                     </Grid>
                                 </Grid>
                             </Box>

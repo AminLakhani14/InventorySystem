@@ -15,7 +15,6 @@ import {
     Button,
     ButtonGroup,
     Stack,
-    TextField,
 } from '@mui/material';
 import { alpha, useTheme } from '@mui/material/styles';
 import { ArrowLeft, Download, TrendingDown, BarChart as BarChartIcon } from 'lucide-react';
@@ -24,6 +23,7 @@ import type { AppDispatch, RootState } from '../../store';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from 'recharts';
 import useAppCurrency from '../../hooks/useAppCurrency';
 import api from '../../api/axios';
+import AppDatePicker from '../../components/Common/AppDatePicker';
 import { fetchProducts } from '../../features/inventory/inventorySlice';
 import { fetchCategoryValuation, fetchSalesTrend, fetchTopSellingProducts, type ReportFilters, type ReportPeriod } from '../../features/reports/reportSlice';
 
@@ -308,22 +308,8 @@ const ReportsPage: React.FC = () => {
                     </ButtonGroup>
                     {selectedPeriod === 'custom' && (
                         <>
-                            <TextField
-                                type="date"
-                                size="small"
-                                label="From"
-                                InputLabelProps={{ shrink: true }}
-                                value={fromDate}
-                                onChange={(e) => setFromDate(e.target.value)}
-                            />
-                            <TextField
-                                type="date"
-                                size="small"
-                                label="To"
-                                InputLabelProps={{ shrink: true }}
-                                value={toDate}
-                                onChange={(e) => setToDate(e.target.value)}
-                            />
+                            <AppDatePicker size="small" label="From" value={fromDate} onChange={setFromDate} maxDate={toDate} />
+                            <AppDatePicker size="small" label="To" value={toDate} onChange={setToDate} minDate={fromDate} />
                         </>
                     )}
                     <Button variant="contained" onClick={handleGenerateReport}>
