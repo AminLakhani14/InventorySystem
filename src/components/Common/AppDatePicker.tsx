@@ -1,8 +1,5 @@
 import React from 'react';
-import { DatePicker } from '@mui/x-date-pickers/DatePicker';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { format, isValid, parseISO } from 'date-fns';
+import { TextField } from '@mui/material';
 
 interface AppDatePickerProps {
     label: string;
@@ -15,24 +12,23 @@ interface AppDatePickerProps {
     required?: boolean;
 }
 
-const toDate = (value?: string) => {
-    if (!value) return null;
-    const parsed = parseISO(value);
-    return isValid(parsed) ? parsed : null;
-};
-
 const AppDatePicker: React.FC<AppDatePickerProps> = ({ label, value, onChange, minDate, maxDate, size = 'medium', fullWidth, required }) => (
-    <LocalizationProvider dateAdapter={AdapterDateFns}>
-        <DatePicker
-            label={label}
-            value={toDate(value)}
-            onChange={(date) => onChange(date && isValid(date) ? format(date, 'yyyy-MM-dd') : '')}
-            minDate={toDate(minDate) || undefined}
-            maxDate={toDate(maxDate) || undefined}
-            format="dd/MM/yyyy"
-            slotProps={{ textField: { size, fullWidth, required } }}
-        />
-    </LocalizationProvider>
+    <TextField
+        type="date"
+        label={label}
+        value={value}
+        onChange={(event: React.ChangeEvent<HTMLInputElement>) => onChange(event.target.value)}
+        size={size}
+        fullWidth={fullWidth}
+        required={required}
+        slotProps={{
+            inputLabel: { shrink: true },
+            htmlInput: {
+                min: minDate,
+                max: maxDate,
+            },
+        }}
+    />
 );
 
 export default AppDatePicker;
