@@ -23,6 +23,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import type { AppDispatch, RootState } from '../../store';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from 'recharts';
 import useAppCurrency from '../../hooks/useAppCurrency';
+import api from '../../api/axios';
 import { fetchProducts } from '../../features/inventory/inventorySlice';
 import { fetchCategoryValuation, fetchSalesTrend, fetchTopSellingProducts, type ReportFilters, type ReportPeriod } from '../../features/reports/reportSlice';
 
@@ -42,17 +43,37 @@ const ReportsPage: React.FC = () => {
         return date.toISOString().split('T')[0];
     });
     const [toDate, setToDate] = useState(() => new Date().toISOString().split('T')[0]);
+    const [customerPayments, setCustomerPayments] = useState<Array<{
+        customerName: string;
+        customerCnic: string;
+        totalReceived: number;
+        paymentCount: number;
+        lastPaymentAt: string;
+    }>>([]);
+    const [paymentReportError, setPaymentReportError] = useState('');
+
+    const loadCustomerPayments = async (filters: ReportFilters) => {
+        try {
+            setPaymentReportError('');
+            const response = await api.get('/reports/customer-payments', { params: filters });
+            setCustomerPayments(response.data || []);
+        } catch (requestError: any) {
+            setPaymentReportError(requestError.response?.data?.message || 'Failed to load customer payment report.');
+        }
+    };
 
     useEffect(() => {
         dispatch(fetchProducts());
         dispatch(fetchSalesTrend({ period: '7days' }));
         dispatch(fetchCategoryValuation());
         dispatch(fetchTopSellingProducts({ period: '7days' }));
+        loadCustomerPayments({ period: '7days' });
     }, [dispatch]);
 
     const runReport = (filters: ReportFilters) => {
         dispatch(fetchSalesTrend(filters));
         dispatch(fetchTopSellingProducts(filters));
+        loadCustomerPayments(filters);
         setGeneratedFilters(filters);
     };
 
@@ -173,6 +194,10 @@ const ReportsPage: React.FC = () => {
     );
 
     const totalProfit = useMemo(() => salesTrend.reduce((sum, point) => sum + (point.profit || 0), 0), [salesTrend]);
+    const totalCustomerPayments = useMemo(
+        () => customerPayments.reduce((sum, row) => sum + Number(row.totalReceived || 0), 0),
+        [customerPayments],
+    );
 
     return (
         <Box>
@@ -241,6 +266,7 @@ const ReportsPage: React.FC = () => {
                     {error}
                 </Alert>
             )}
+            {paymentReportError && <Alert severity="error" sx={{ mb: 3 }}>{paymentReportError}</Alert>}
 
             <Alert severity={totalProfit >= 0 ? 'success' : 'warning'} sx={{ mb: 3 }}>
                 Total profit/loss for {reportHeading.toLowerCase()}:{' '}
@@ -374,6 +400,60 @@ const ReportsPage: React.FC = () => {
                                     </PieChart>
                                 </ResponsiveContainer>
                             </Box>
+                        </CardContent>
+                    </Card>
+                </Grid>
+
+                <Grid size={12}>
+                    <Card sx={{ borderRadius: 4 }}>
+                        <CardContent>
+                            <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={1} sx={{ mb: 2 }}>
+                                <Box>
+                                    <Typography variant="h6" fontWeight={800}>Customer Payment Recovery</Typography>
+                                    <Typography variant="body2" color="text.secondary">
+                                        Customer-wise payments received for {reportHeading.toLowerCase()}.
+                                    </Typography>
+                                </Box>
+                                <Box sx={{ textAlign: { xs: 'left', sm: 'right' } }}>
+                                    <Typography variant="caption" color="text.secondary">TOTAL PAYMENT RECEIVED</Typography>
+                                    <Typography variant="h5" fontWeight={900} color="success.main">
+                                        {formatCurrency(totalCustomerPayments, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                    </Typography>
+                                    <Typography variant="caption" color="text.secondary">
+                                        From {customerPayments.length} customer{customerPayments.length === 1 ? '' : 's'}
+                                    </Typography>
+                                </Box>
+                            </Stack>
+                            <TableContainer sx={{ overflowX: 'auto' }}>
+                                <Table sx={{ minWidth: 720 }}>
+                                    <TableHead sx={{ bgcolor: 'rgba(0,0,0,0.02)' }}>
+                                        <TableRow>
+                                            <TableCell sx={{ fontWeight: 700 }}>CUSTOMER</TableCell>
+                                            <TableCell sx={{ fontWeight: 700 }}>CNIC / ID</TableCell>
+                                            <TableCell sx={{ fontWeight: 700 }}>PAYMENTS</TableCell>
+                                            <TableCell sx={{ fontWeight: 700 }}>LAST PAYMENT</TableCell>
+                                            <TableCell align="right" sx={{ fontWeight: 700 }}>TOTAL RECEIVED</TableCell>
+                                        </TableRow>
+                                    </TableHead>
+                                    <TableBody>
+                                        {customerPayments.length === 0 ? (
+                                            <TableRow><TableCell colSpan={5} align="center" sx={{ py: 6 }}>
+                                                <Typography color="text.secondary">No customer payments received in this period.</Typography>
+                                            </TableCell></TableRow>
+                                        ) : customerPayments.map((row) => (
+                                            <TableRow key={`${row.customerName}-${row.customerCnic}`} hover>
+                                                <TableCell sx={{ fontWeight: 800 }}>{row.customerName}</TableCell>
+                                                <TableCell>{row.customerCnic || '-'}</TableCell>
+                                                <TableCell>{row.paymentCount}</TableCell>
+                                                <TableCell>{new Date(row.lastPaymentAt).toLocaleString()}</TableCell>
+                                                <TableCell align="right" sx={{ fontWeight: 900, color: 'success.main' }}>
+                                                    {formatCurrency(row.totalReceived, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                                </TableCell>
+                                            </TableRow>
+                                        ))}
+                                    </TableBody>
+                                </Table>
+                            </TableContainer>
                         </CardContent>
                     </Card>
                 </Grid>

@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import Transaction from '../models/Transaction';
 import Product from '../models/Product';
+import CreditPayment from '../models/CreditPayment';
 import type { AuthRequest } from '../middleware/auth';
 import { buildTenantFilter } from '../utils/tenancy';
 
@@ -123,5 +124,41 @@ export const getTopSellingProducts = async (req: AuthRequest, res: Response) => 
         res.json(topSelling);
     } catch (error: any) {
         res.status(500).json({ message: error.message });
+    }
+};
+
+export const getCustomerPaymentsReport = async (req: AuthRequest, res: Response) => {
+    try {
+        const { dateLimit, endDate } = resolveReportRange(req.query);
+        const rows = await CreditPayment.aggregate([
+            {
+                $match: {
+                    ...buildTenantFilter(req.user!),
+                    timestamp: { $gte: dateLimit, $lte: endDate },
+                },
+            },
+            {
+                $group: {
+                    _id: {
+                        customerName: '$customerName',
+                        customerCnic: '$customerCnic',
+                    },
+                    totalReceived: { $sum: { $ifNull: ['$receivedAmount', '$amount'] } },
+                    paymentCount: { $sum: 1 },
+                    lastPaymentAt: { $max: '$timestamp' },
+                },
+            },
+            { $sort: { totalReceived: -1 } },
+        ]);
+
+        res.json(rows.map((row) => ({
+            customerName: row._id.customerName,
+            customerCnic: row._id.customerCnic,
+            totalReceived: row.totalReceived,
+            paymentCount: row.paymentCount,
+            lastPaymentAt: row.lastPaymentAt,
+        })));
+    } catch (error: any) {
+        res.status(500).json({ message: error.message || 'Failed to fetch customer payments report' });
     }
 };

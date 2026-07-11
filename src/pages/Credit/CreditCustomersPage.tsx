@@ -44,6 +44,16 @@ interface CreditCustomer {
     nextDueDate?: string | null;
 }
 
+interface CreditPayment {
+    _id: string;
+    customerName: string;
+    customerCnic: string;
+    receivedAmount: number;
+    paidVia: 'cash' | 'card';
+    notes?: string;
+    timestamp: string;
+}
+
 const todayDateInput = () => new Date().toISOString().split('T')[0];
 
 const CreditCustomersPage: React.FC = () => {
@@ -51,6 +61,7 @@ const CreditCustomersPage: React.FC = () => {
     const { country } = useSelector((state: RootState) => state.settings);
     const regionalIdLabel = getRegionalIdLabel(country);
     const [customers, setCustomers] = useState<CreditCustomer[]>([]);
+    const [payments, setPayments] = useState<CreditPayment[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
@@ -68,8 +79,12 @@ const CreditCustomersPage: React.FC = () => {
         setError('');
 
         try {
-            const response = await api.get('/credits/customers');
-            setCustomers(response.data || []);
+            const [customersResponse, paymentsResponse] = await Promise.all([
+                api.get('/credits/customers'),
+                api.get('/credits/payments'),
+            ]);
+            setCustomers(customersResponse.data || []);
+            setPayments(paymentsResponse.data || []);
         } catch (fetchError: any) {
             setError(fetchError.response?.data?.message || 'Unable to load credit customers.');
         } finally {
@@ -105,6 +120,19 @@ const CreditCustomersPage: React.FC = () => {
             return haystack.includes(query);
         });
     }, [customers, searchTerm]);
+
+    const filteredPayments = useMemo(() => {
+        const query = searchTerm.trim().toLowerCase();
+        if (!query) return payments;
+        return payments.filter((payment) => [
+            payment.customerName,
+            payment.customerCnic,
+            payment.receivedAmount,
+            payment.paidVia,
+            payment.notes,
+            new Date(payment.timestamp).toLocaleString(),
+        ].join(' ').toLowerCase().includes(query));
+    }, [payments, searchTerm]);
 
     const handlePrint = () => {
         window.print();
@@ -327,6 +355,49 @@ const CreditCustomersPage: React.FC = () => {
                                         </TableRow>
                                     ))
                                 )}
+                            </TableBody>
+                        </Table>
+                    </TableContainer>
+                </CardContent>
+            </Card>
+
+            <Card sx={{ borderRadius: 4, overflow: 'hidden', mt: 3 }}>
+                <CardContent sx={{ p: 0 }}>
+                    <Box sx={{ p: 2.5, borderBottom: '1px solid', borderColor: 'divider' }}>
+                        <Typography variant="h6" fontWeight={900}>Payment History</Typography>
+                        <Typography variant="body2" color="text.secondary">
+                            Amount received and the client it was received for.
+                        </Typography>
+                    </Box>
+                    <TableContainer sx={{ overflowX: 'auto' }}>
+                        <Table sx={{ minWidth: 760 }}>
+                            <TableHead>
+                                <TableRow>
+                                    <TableCell sx={{ fontWeight: 700 }}>DATE</TableCell>
+                                    <TableCell sx={{ fontWeight: 700 }}>CLIENT</TableCell>
+                                    <TableCell sx={{ fontWeight: 700 }}>{regionalIdLabel.toUpperCase()}</TableCell>
+                                    <TableCell sx={{ fontWeight: 700 }}>RECEIVED</TableCell>
+                                    <TableCell sx={{ fontWeight: 700 }}>PAID VIA</TableCell>
+                                    <TableCell sx={{ fontWeight: 700 }}>NOTES</TableCell>
+                                </TableRow>
+                            </TableHead>
+                            <TableBody>
+                                {filteredPayments.length === 0 ? (
+                                    <TableRow><TableCell colSpan={6} align="center" sx={{ py: 6 }}>
+                                        <Typography color="text.secondary">No credit payments received yet.</Typography>
+                                    </TableCell></TableRow>
+                                ) : filteredPayments.map((payment) => (
+                                    <TableRow key={payment._id} hover>
+                                        <TableCell>{new Date(payment.timestamp).toLocaleString()}</TableCell>
+                                        <TableCell sx={{ fontWeight: 800 }}>{payment.customerName}</TableCell>
+                                        <TableCell>{payment.customerCnic || '-'}</TableCell>
+                                        <TableCell sx={{ color: 'success.main', fontWeight: 900 }}>
+                                            {formatCurrency(payment.receivedAmount, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                        </TableCell>
+                                        <TableCell sx={{ textTransform: 'capitalize' }}>{payment.paidVia}</TableCell>
+                                        <TableCell>{payment.notes || '-'}</TableCell>
+                                    </TableRow>
+                                ))}
                             </TableBody>
                         </Table>
                     </TableContainer>
