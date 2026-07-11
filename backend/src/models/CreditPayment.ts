@@ -14,8 +14,8 @@ export interface ICreditPayment extends Document {
 
 const CreditPaymentSchema: Schema<ICreditPayment> = new Schema({
     customerName: { type: String, required: true, trim: true, index: true },
-    customerCnic: { type: String, required: true, trim: true, index: true },
-    amount: { type: Number, required: true, min: 0.01 },
+    customerCnic: { type: String, default: '', trim: true, index: true },
+    amount: { type: Number, required: true, min: 0 },
     paidVia: { type: String, enum: ['cash', 'card'], required: true },
     receivedBy: { type: String, required: true, trim: true },
     notes: { type: String, default: '' },

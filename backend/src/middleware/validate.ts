@@ -86,7 +86,7 @@ export const productSchema = Joi.object({
 
 export const creditPaymentSchema = Joi.object({
     customerName: Joi.string().min(2).required(),
-    customerCnic: Joi.string().min(5).required(),
+    customerCnic: Joi.string().allow('').max(80).optional().default(''),
     amount: Joi.number().positive().required(),
     paidVia: Joi.string().valid('cash', 'card').required(),
     notes: Joi.string().allow('').optional(),

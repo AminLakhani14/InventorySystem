@@ -79,6 +79,9 @@ const CreditCustomersPage: React.FC = () => {
 
     useEffect(() => {
         loadCustomers();
+        const refresh = () => loadCustomers();
+        window.addEventListener('itemhive-credit-updated', refresh);
+        return () => window.removeEventListener('itemhive-credit-updated', refresh);
     }, []);
 
     const filteredCustomers = useMemo(() => {
@@ -264,7 +267,6 @@ const CreditCustomersPage: React.FC = () => {
                             <TableHead>
                                 <TableRow>
                                     <TableCell sx={{ fontWeight: 700 }}>CUSTOMER</TableCell>
-                                    {/* <TableCell sx={{ fontWeight: 700 }}>{regionalIdLabel.toUpperCase()}</TableCell> */}
                                     <TableCell sx={{ fontWeight: 700 }}>INVOICES</TableCell>
                                     <TableCell sx={{ fontWeight: 700 }}>CREDIT ISSUED</TableCell>
                                     <TableCell sx={{ fontWeight: 700 }}>RECOVERED</TableCell>
@@ -277,7 +279,7 @@ const CreditCustomersPage: React.FC = () => {
                             <TableBody>
                                 {filteredCustomers.length === 0 ? (
                                     <TableRow>
-                                        <TableCell colSpan={9} align="center" sx={{ py: 8 }}>
+                                        <TableCell colSpan={8} align="center" sx={{ py: 8 }}>
                                             <Typography color="text.secondary">
                                                 {loading ? 'Loading credit customers...' : 'No outstanding credit customers right now.'}
                                             </Typography>
@@ -286,8 +288,16 @@ const CreditCustomersPage: React.FC = () => {
                                 ) : (
                                     filteredCustomers.map((customer) => (
                                         <TableRow key={`${customer.customerCnic}-${customer.customerName}`} hover>
-                                            <TableCell sx={{ fontWeight: 700 }}>{customer.customerName}</TableCell>
-                                            <TableCell>{customer.customerCnic}</TableCell>
+                                            <TableCell>
+                                                <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                                                    {customer.customerName}
+                                                </Typography>
+                                                {customer.customerCnic && (
+                                                    <Typography variant="caption" color="text.secondary">
+                                                        {regionalIdLabel}: {customer.customerCnic}
+                                                    </Typography>
+                                                )}
+                                            </TableCell>
                                             <TableCell>{customer.totalInvoices}</TableCell>
                                             <TableCell>{formatCurrency(customer.totalCreditIssued, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</TableCell>
                                             <TableCell sx={{ color: 'success.main', fontWeight: 700 }}>

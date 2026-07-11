@@ -3,11 +3,15 @@ import mongoose from 'mongoose';
 import InstallmentPlan from '../models/InstallmentPlan';
 import Product from '../models/Product';
 import Transaction from '../models/Transaction';
+import Customer from '../models/Customer';
 import type { AuthRequest } from '../middleware/auth';
 import { normalizeRole } from '../utils/accessControl';
 import { buildTenantFilter, getTenantObjectId } from '../utils/tenancy';
 
 const round2 = (value: number) => Math.round(value * 100) / 100;
+
+const buildCustomerKey = (customerName: string, customerCnic: string) =>
+    `${customerName.trim().toLowerCase()}::${customerCnic.trim().toLowerCase()}`;
 
 const buildSchedule = (saleDateInput: string | Date, months: 3 | 6 | 9 | 12, financedAmount: number) => {
     const saleDate = new Date(saleDateInput);
@@ -53,8 +57,51 @@ const refreshInstallmentStatus = (plan: any) => {
 
 export const getInstallmentPlans = async (req: AuthRequest, res: Response) => {
     try {
-        const plans = await InstallmentPlan.find(buildTenantFilter(req.user!)).sort({ createdAt: -1 });
-        res.json(plans);
+        const tenantFilter = buildTenantFilter(req.user!);
+        const [plans, closingBalanceCustomers] = await Promise.all([
+            InstallmentPlan.find(tenantFilter).sort({ createdAt: -1 }).lean(),
+            Customer.find({ ...tenantFilter, amount: { $gt: 0 } })
+                .select('fullName cnic phoneNumber address amount updatedAt')
+                .lean(),
+        ]);
+
+        const activeInstallmentCustomerKeys = new Set(
+            plans
+                .filter((plan) => plan.status === 'active')
+                .map((plan) => buildCustomerKey(plan.customerName, plan.customerCnic))
+        );
+
+        const closingBalancePlans = closingBalanceCustomers.map((customer) => {
+            const balance = round2(Number(customer.amount || 0));
+            const hasActiveInstallment = activeInstallmentCustomerKeys.has(
+                buildCustomerKey(customer.fullName, customer.cnic || '')
+            );
+
+            return {
+                planCode: `BAL-${customer._id}`,
+                productId: '',
+                productName: hasActiveInstallment ? 'Additional credit balance' : 'Opening credit balance',
+                customerName: customer.fullName,
+                customerCnic: customer.cnic || '',
+                customerPhone: customer.phoneNumber || '',
+                customerAddress: customer.address || '',
+                witnesses: [],
+                saleDate: customer.updatedAt || new Date(),
+                installmentMonths: 0,
+                unitPrice: balance,
+                advancePayment: 0,
+                financedAmount: balance,
+                monthlyInstallmentAmount: balance,
+                totalAmount: balance,
+                paidAmount: 0,
+                remainingAmount: balance,
+                status: 'active',
+                schedule: [],
+                source: 'closing-balance',
+            };
+        });
+
+        res.json([...closingBalancePlans, ...plans]);
     } catch (error: any) {
         res.status(500).json({ message: error.message || 'Failed to fetch installment plans' });
     }

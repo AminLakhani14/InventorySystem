@@ -10,6 +10,7 @@ import {
     DialogContent,
     DialogTitle,
     Grid,
+    InputAdornment,
     MenuItem,
     Stack,
     Table,
@@ -53,7 +54,7 @@ interface InstallmentPlan {
     customerAddress: string;
     witnesses: InstallmentWitness[];
     saleDate: string;
-    installmentMonths: 3 | 6 | 9 | 12;
+    installmentMonths: 0 | 3 | 6 | 9 | 12;
     unitPrice: number;
     advancePayment: number;
     financedAmount: number;
@@ -63,10 +64,13 @@ interface InstallmentPlan {
     remainingAmount: number;
     status: 'active' | 'cleared';
     schedule: InstallmentScheduleItem[];
+    source?: 'installment' | 'closing-balance';
 }
 
+const todayDateInput = () => new Date().toISOString().split('T')[0];
+
 const InstallmentsPage: React.FC = () => {
-    const { formatCurrency } = useAppCurrency();
+    const { formatCurrency, currencySymbol } = useAppCurrency();
     const { country } = useSelector((state: RootState) => state.settings);
     const regionalIdLabel = getRegionalIdLabel(country);
     const [plans, setPlans] = useState<InstallmentPlan[]>([]);
@@ -76,6 +80,8 @@ const InstallmentsPage: React.FC = () => {
     const [selectedInstallmentNumber, setSelectedInstallmentNumber] = useState('');
     const [paidVia, setPaidVia] = useState<'cash' | 'card'>('cash');
     const [notes, setNotes] = useState('');
+    const [balancePaymentAmount, setBalancePaymentAmount] = useState('');
+    const [balancePaymentDate, setBalancePaymentDate] = useState(todayDateInput());
     const [saving, setSaving] = useState(false);
     const [success, setSuccess] = useState('');
 
@@ -105,6 +111,8 @@ const InstallmentsPage: React.FC = () => {
         const nextPending = plan.schedule.find((item) => item.status === 'pending');
         setSelectedPlan(plan);
         setSelectedInstallmentNumber(nextPending ? String(nextPending.installmentNumber) : '');
+        setBalancePaymentAmount(plan.source === 'closing-balance' ? plan.remainingAmount.toFixed(2) : '');
+        setBalancePaymentDate(todayDateInput());
         setPaidVia('cash');
         setNotes('');
     };
@@ -112,28 +120,56 @@ const InstallmentsPage: React.FC = () => {
     const handleClosePayment = () => {
         setSelectedPlan(null);
         setSelectedInstallmentNumber('');
+        setBalancePaymentAmount('');
+        setBalancePaymentDate(todayDateInput());
         setPaidVia('cash');
         setNotes('');
     };
 
     const handleSavePayment = async () => {
-        if (!selectedPlan || !selectedInstallmentNumber) {
+        if (!selectedPlan) {
+            return;
+        }
+
+        const isClosingBalance = selectedPlan.source === 'closing-balance';
+        if (!isClosingBalance && !selectedInstallmentNumber) {
             return;
         }
 
         setSaving(true);
         try {
-            await api.post(`/installments/${selectedPlan.planCode}/payments`, {
-                installmentNumber: Number(selectedInstallmentNumber),
-                paidVia,
-                notes,
-            });
-            setSuccess(`Installment marked paid for ${selectedPlan.customerName}.`);
+            if (isClosingBalance) {
+                const amount = Number(balancePaymentAmount || 0);
+                if (!Number.isFinite(amount) || amount <= 0) {
+                    throw new Error('Payment amount must be greater than zero.');
+                }
+                if (amount > selectedPlan.remainingAmount) {
+                    throw new Error('Payment cannot exceed the remaining balance.');
+                }
+
+                await api.post('/credits/payments', {
+                    customerName: selectedPlan.customerName,
+                    customerCnic: selectedPlan.customerCnic,
+                    amount,
+                    paidVia,
+                    notes,
+                    paymentDate: balancePaymentDate,
+                });
+                setSuccess(`Payment received from ${selectedPlan.customerName}.`);
+                window.dispatchEvent(new Event('itemhive-credit-updated'));
+            } else {
+                await api.post(`/installments/${selectedPlan.planCode}/payments`, {
+                    installmentNumber: Number(selectedInstallmentNumber),
+                    paidVia,
+                    notes,
+                });
+                setSuccess(`Installment marked paid for ${selectedPlan.customerName}.`);
+            }
             window.dispatchEvent(new Event('itemhive-installments-updated'));
             handleClosePayment();
             await loadPlans();
         } catch (saveError: any) {
-            setError(saveError.response?.data?.message || 'Unable to update installment payment.');
+            setError(saveError.response?.data?.message || saveError.message || 'Unable to update installment payment.');
         } finally {
             setSaving(false);
         }
@@ -189,6 +225,7 @@ const InstallmentsPage: React.FC = () => {
                                             </TableRow>
                                         ) : (
                                             activePlans.map((plan) => {
+                                                const isClosingBalance = plan.source === 'closing-balance';
                                                 const nextPending = plan.schedule.find((item) => item.status === 'pending');
                                                 const nextDueDate = nextPending ? new Date(nextPending.dueDate) : null;
                                                 const isOverdue = nextDueDate ? nextDueDate <= new Date() : false;
@@ -198,7 +235,7 @@ const InstallmentsPage: React.FC = () => {
                                                         <TableCell>
                                                             <Typography variant="body2" fontWeight={800}>{plan.planCode}</Typography>
                                                             <Typography variant="caption" color="text.secondary">
-                                                                Sale: {new Date(plan.saleDate).toLocaleDateString()}
+                                                                {isClosingBalance ? 'Balance' : 'Sale'}: {new Date(plan.saleDate).toLocaleDateString()}
                                                             </Typography>
                                                         </TableCell>
                                                         <TableCell>
@@ -211,21 +248,40 @@ const InstallmentsPage: React.FC = () => {
                                                         </TableCell>
                                                         <TableCell>
                                                             <Typography variant="body2" fontWeight={700}>{plan.productName}</Typography>
-                                                            <Typography variant="caption" color="text.secondary">
-                                                                {plan.witnesses[0]?.name} / {plan.witnesses[1]?.name}
-                                                            </Typography>
-                                                            <Typography variant="caption" color="text.secondary" display="block">
-                                                                Witness IDs ({regionalIdLabel}): {plan.witnesses[0]?.cnic} / {plan.witnesses[1]?.cnic}
-                                                            </Typography>
+                                                            {isClosingBalance ? (
+                                                                <Typography variant="caption" color="text.secondary">
+                                                                    Customer closing amount
+                                                                </Typography>
+                                                            ) : (
+                                                                <>
+                                                                    <Typography variant="caption" color="text.secondary">
+                                                                        {plan.witnesses[0]?.name} / {plan.witnesses[1]?.name}
+                                                                    </Typography>
+                                                                    <Typography variant="caption" color="text.secondary" display="block">
+                                                                        Witness IDs ({regionalIdLabel}): {plan.witnesses[0]?.cnic} / {plan.witnesses[1]?.cnic}
+                                                                    </Typography>
+                                                                </>
+                                                            )}
                                                         </TableCell>
                                                         <TableCell>
-                                                            <Typography variant="body2" fontWeight={700}>{plan.installmentMonths} months</Typography>
-                                                            <Typography variant="caption" color="text.secondary">
-                                                                {formatCurrency(plan.monthlyInstallmentAmount, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}/month
-                                                            </Typography>
-                                                            <Typography variant="caption" color="text.secondary" display="block">
-                                                                Advance: {formatCurrency(plan.advancePayment, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                                                            </Typography>
+                                                            {isClosingBalance ? (
+                                                                <>
+                                                                    <Typography variant="body2" fontWeight={700}>Manual balance</Typography>
+                                                                    <Typography variant="caption" color="text.secondary">
+                                                                        Receivable credit
+                                                                    </Typography>
+                                                                </>
+                                                            ) : (
+                                                                <>
+                                                                    <Typography variant="body2" fontWeight={700}>{plan.installmentMonths} months</Typography>
+                                                                    <Typography variant="caption" color="text.secondary">
+                                                                        {formatCurrency(plan.monthlyInstallmentAmount, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}/month
+                                                                    </Typography>
+                                                                    <Typography variant="caption" color="text.secondary" display="block">
+                                                                        Advance: {formatCurrency(plan.advancePayment, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                                                    </Typography>
+                                                                </>
+                                                            )}
                                                         </TableCell>
                                                         <TableCell>{formatCurrency(plan.totalAmount, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</TableCell>
                                                         <TableCell sx={{ color: 'warning.main', fontWeight: 800 }}>
@@ -245,7 +301,7 @@ const InstallmentsPage: React.FC = () => {
                                                         </TableCell>
                                                         <TableCell align="right">
                                                             <Button variant="contained" size="small" onClick={() => handleOpenPayment(plan)}>
-                                                                Mark Paid
+                                                                {isClosingBalance ? 'Receive Payment' : 'Mark Paid'}
                                                             </Button>
                                                         </TableCell>
                                                     </TableRow>
@@ -261,7 +317,7 @@ const InstallmentsPage: React.FC = () => {
             </Grid>
 
             <Dialog open={Boolean(selectedPlan)} onClose={handleClosePayment} maxWidth="sm" fullWidth>
-                <DialogTitle>Mark Installment Paid</DialogTitle>
+                <DialogTitle>{selectedPlan?.source === 'closing-balance' ? 'Receive Balance Payment' : 'Mark Installment Paid'}</DialogTitle>
                 <DialogContent>
                     {selectedPlan && (
                         <Stack spacing={2} sx={{ pt: 1 }}>
@@ -271,19 +327,42 @@ const InstallmentsPage: React.FC = () => {
                                     {selectedPlan.productName} | Remaining {formatCurrency(selectedPlan.remainingAmount, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                                 </Typography>
                             </Box>
-                            <TextField
-                                select
-                                fullWidth
-                                label="Installment"
-                                value={selectedInstallmentNumber}
-                                onChange={(e) => setSelectedInstallmentNumber(e.target.value)}
-                            >
-                                {selectedPlan.schedule.filter((item) => item.status === 'pending').map((item) => (
-                                    <MenuItem key={item.installmentNumber} value={String(item.installmentNumber)}>
-                                        #{item.installmentNumber} | {new Date(item.dueDate).toLocaleDateString()} | {formatCurrency(item.amount, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                                    </MenuItem>
-                                ))}
-                            </TextField>
+                            {selectedPlan.source === 'closing-balance' ? (
+                                <>
+                                    <TextField
+                                        fullWidth
+                                        type="number"
+                                        label="Amount Received"
+                                        value={balancePaymentAmount}
+                                        onChange={(e) => setBalancePaymentAmount(e.target.value)}
+                                        InputProps={{
+                                            startAdornment: <InputAdornment position="start">{currencySymbol}</InputAdornment>,
+                                        }}
+                                    />
+                                    <TextField
+                                        fullWidth
+                                        type="date"
+                                        label="Payment Date"
+                                        InputLabelProps={{ shrink: true }}
+                                        value={balancePaymentDate}
+                                        onChange={(e) => setBalancePaymentDate(e.target.value)}
+                                    />
+                                </>
+                            ) : (
+                                <TextField
+                                    select
+                                    fullWidth
+                                    label="Installment"
+                                    value={selectedInstallmentNumber}
+                                    onChange={(e) => setSelectedInstallmentNumber(e.target.value)}
+                                >
+                                    {selectedPlan.schedule.filter((item) => item.status === 'pending').map((item) => (
+                                        <MenuItem key={item.installmentNumber} value={String(item.installmentNumber)}>
+                                            #{item.installmentNumber} | {new Date(item.dueDate).toLocaleDateString()} | {formatCurrency(item.amount, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                        </MenuItem>
+                                    ))}
+                                </TextField>
+                            )}
                             <TextField
                                 select
                                 fullWidth
@@ -307,7 +386,11 @@ const InstallmentsPage: React.FC = () => {
                 </DialogContent>
                 <DialogActions>
                     <Button variant="outlined" onClick={handleClosePayment}>Cancel</Button>
-                    <Button variant="contained" onClick={handleSavePayment} disabled={saving}>
+                    <Button
+                        variant="contained"
+                        onClick={handleSavePayment}
+                        disabled={saving || (selectedPlan?.source !== 'closing-balance' && !selectedInstallmentNumber)}
+                    >
                         {saving ? 'Saving...' : 'Save Payment'}
                     </Button>
                 </DialogActions>

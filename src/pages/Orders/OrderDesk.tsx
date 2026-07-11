@@ -195,6 +195,36 @@ const paymentOptions: Array<{
 
 const ANONYMOUS_CUSTOMER_NAME = "Anonymous";
 
+const ORDER_DRAFT_STORAGE_KEY = "itemhive-order-desk-draft";
+
+interface OrderDeskDraft {
+  selectedProduct: Product | null;
+  productSearchText: string;
+  quantity: number | string;
+  rate: number | string;
+  lineItems: OrderLineItem[];
+  selectedCustomer: Customer | null;
+  customerName: string;
+  note: string;
+}
+
+const loadOrderDeskDraft = (): OrderDeskDraft | null => {
+  try {
+    const raw = sessionStorage.getItem(ORDER_DRAFT_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as OrderDeskDraft) : null;
+  } catch {
+    return null;
+  }
+};
+
+const clearOrderDeskDraft = () => {
+  try {
+    sessionStorage.removeItem(ORDER_DRAFT_STORAGE_KEY);
+  } catch {
+    // ignore storage access errors
+  }
+};
+
 const getLineProductLabel = (lineItems?: OrderLineItem[], fallback = "") => {
   if (!lineItems?.length) return fallback;
   if (lineItems.length === 1) return lineItems[0].productName;
@@ -239,8 +269,14 @@ const OrderDesk: React.FC = () => {
     return Number((qtyNumber * rateNumber).toFixed(2));
   };
 
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-  const [productSearchText, setProductSearchText] = useState("");
+  const initialDraft = useMemo(() => loadOrderDeskDraft(), []);
+
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(
+    initialDraft?.selectedProduct ?? null,
+  );
+  const [productSearchText, setProductSearchText] = useState(
+    initialDraft?.productSearchText ?? "",
+  );
   const [productDialogOpen, setProductDialogOpen] = useState(false);
   const [productForm, setProductForm] = useState(initialProductForm);
   const [productSaving, setProductSaving] = useState(false);
@@ -252,15 +288,21 @@ const OrderDesk: React.FC = () => {
   const [productImageUrlInput, setProductImageUrlInput] = useState("");
   const [selectedProductSuggestionId, setSelectedProductSuggestionId] = useState("");
   const productFileInputRef = useRef<HTMLInputElement | null>(null);
-  const [quantity, setQuantity] = useState<number | string>(1);
-  const [rate, setRate] = useState<number | string>("");
-  const [lineItems, setLineItems] = useState<OrderLineItem[]>([]);
+  const [quantity, setQuantity] = useState<number | string>(
+    initialDraft?.quantity ?? 1,
+  );
+  const [rate, setRate] = useState<number | string>(initialDraft?.rate ?? "");
+  const [lineItems, setLineItems] = useState<OrderLineItem[]>(
+    initialDraft?.lineItems ?? [],
+  );
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [creditCustomers, setCreditCustomers] = useState<CreditCustomer[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(
-    null,
+    initialDraft?.selectedCustomer ?? null,
   );
-  const [customerName, setCustomerName] = useState("");
+  const [customerName, setCustomerName] = useState(
+    initialDraft?.customerName ?? "",
+  );
   const [customerDialogOpen, setCustomerDialogOpen] = useState(false);
   const [customerForm, setCustomerForm] = useState(initialCustomerForm);
   const [customerSaving, setCustomerSaving] = useState(false);
@@ -274,7 +316,7 @@ const OrderDesk: React.FC = () => {
   const [creditPaidNow, setCreditPaidNow] = useState(0);
   const [creditDue, setCreditDue] = useState(0);
   const [creditPreviousAdjustment, setCreditPreviousAdjustment] = useState(0);
-  const [note, setNote] = useState("");
+  const [note, setNote] = useState(initialDraft?.note ?? "");
   const [invoiceOrder, setInvoiceOrder] = useState<Order | null>(null);
   const [printTarget, setPrintTarget] = useState<"orders" | "invoice">(
     "orders",
@@ -295,6 +337,47 @@ const OrderDesk: React.FC = () => {
     dispatch(fetchProducts());
     dispatch(fetchTransactions());
   }, [dispatch]);
+
+  useEffect(() => {
+    const draft: OrderDeskDraft = {
+      selectedProduct,
+      productSearchText,
+      quantity,
+      rate,
+      lineItems,
+      selectedCustomer,
+      customerName,
+      note,
+    };
+    const isEmptyDraft =
+      !selectedProduct &&
+      !productSearchText &&
+      !customerName &&
+      !selectedCustomer &&
+      !note &&
+      lineItems.length === 0 &&
+      quantity === 1 &&
+      rate === "";
+
+    try {
+      if (isEmptyDraft) {
+        sessionStorage.removeItem(ORDER_DRAFT_STORAGE_KEY);
+      } else {
+        sessionStorage.setItem(ORDER_DRAFT_STORAGE_KEY, JSON.stringify(draft));
+      }
+    } catch {
+      // ignore storage access errors
+    }
+  }, [
+    selectedProduct,
+    productSearchText,
+    quantity,
+    rate,
+    lineItems,
+    selectedCustomer,
+    customerName,
+    note,
+  ]);
 
   useEffect(() => {
     const resetPrintTarget = () => setPrintTarget("orders");
@@ -328,7 +411,14 @@ const OrderDesk: React.FC = () => {
     loadCreditCustomers();
   }, [loadCustomers, loadCreditCustomers]);
 
-  const availableStock = selectedProduct?.stock ?? 0;
+  const liveSelectedProduct = useMemo(
+    () =>
+      selectedProduct
+        ? products.find((p) => p.id === selectedProduct.id) || selectedProduct
+        : null,
+    [products, selectedProduct],
+  );
+  const availableStock = liveSelectedProduct?.stock ?? 0;
   const requestedQty = Math.max(0, parseInt(quantity.toString() || "0"));
   const numericRate = Math.max(0, Number(rate || 0));
   const lineAmount = calculateOrderAmount(numericRate, requestedQty);
@@ -384,8 +474,16 @@ const OrderDesk: React.FC = () => {
       ) || null
     );
   }, [creditCustomers, selectedCustomer]);
-  const selectedCustomerClosingCredit = selectedCustomer
-    ? Number(selectedCustomer.amount || 0)
+  const liveSelectedCustomer = useMemo(
+    () =>
+      selectedCustomer
+        ? customers.find((c) => c._id === selectedCustomer._id) ||
+          selectedCustomer
+        : null,
+    [customers, selectedCustomer],
+  );
+  const selectedCustomerClosingCredit = liveSelectedCustomer
+    ? Number(liveSelectedCustomer.amount || 0)
     : 0;
   const selectedCustomerTransactionCredit = selectedCustomer
     ? Number(selectedCreditCustomer?.outstandingAmount || 0)
@@ -505,6 +603,7 @@ const OrderDesk: React.FC = () => {
     setCreditDue(0);
     setCreditPreviousAdjustment(0);
     setNote("");
+    clearOrderDeskDraft();
   };
 
   const handleAddLineItem = () => {
@@ -520,10 +619,10 @@ const OrderDesk: React.FC = () => {
       .filter((line) => line.productId === pendingLineItem.productId)
       .reduce((sum, line) => sum + line.quantity, 0);
 
-    if (existingQtyForProduct + pendingLineItem.quantity > selectedProduct.stock) {
+    if (existingQtyForProduct + pendingLineItem.quantity > availableStock) {
       setFeedback({
         type: "error",
-        message: `Only ${selectedProduct.stock} ${selectedProductUnitLabel} available for ${selectedProduct.name}.`,
+        message: `Only ${availableStock} ${selectedProductUnitLabel} available for ${selectedProduct.name}.`,
       });
       return;
     }
@@ -998,7 +1097,7 @@ const OrderDesk: React.FC = () => {
       if (confirmedPreviousAdjustment > 0) {
         try {
           await applyPreviousCreditAdjustment(
-            selectedCustomer,
+            liveSelectedCustomer,
             confirmedPreviousAdjustment,
           );
           previousAdjustmentApplied = true;
@@ -2138,7 +2237,7 @@ const OrderDesk: React.FC = () => {
                         }}
                         helperText={
                           selectedProduct
-                            ? `Available stock: ${selectedProduct.stock}`
+                            ? `Available stock: ${availableStock}`
                             : ""
                         }
                         sx={{ width: { xs: "100%", sm: 260 } }}
