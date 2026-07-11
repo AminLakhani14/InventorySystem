@@ -112,6 +112,7 @@ interface Customer {
 interface CreditCustomer {
   customerName: string;
   customerCnic: string;
+  closingBalance: number;
   outstandingAmount: number;
 }
 
@@ -485,8 +486,15 @@ const OrderDesk: React.FC = () => {
   const selectedCustomerClosingCredit = liveSelectedCustomer
     ? Number(liveSelectedCustomer.amount || 0)
     : 0;
+  // The backend's `outstandingAmount` already folds in the customer's closing
+  // balance, so subtract it out here to get the credit-sale (transaction) portion
+  // only — otherwise the closing amount gets counted twice in the credit balance.
   const selectedCustomerTransactionCredit = selectedCustomer
-    ? Number(selectedCreditCustomer?.outstandingAmount || 0)
+    ? Math.max(
+        Number(selectedCreditCustomer?.outstandingAmount || 0) -
+          Number(selectedCreditCustomer?.closingBalance || 0),
+        0,
+      )
     : 0;
   const selectedCustomerCreditBalance =
     selectedCustomerClosingCredit + selectedCustomerTransactionCredit;
