@@ -18,7 +18,7 @@ import {
     TextField,
 } from '@mui/material';
 import { alpha, useTheme } from '@mui/material/styles';
-import { TrendingDown, BarChart as BarChartIcon } from 'lucide-react';
+import { ArrowLeft, Download, TrendingDown, BarChart as BarChartIcon } from 'lucide-react';
 import { useDispatch, useSelector } from 'react-redux';
 import type { AppDispatch, RootState } from '../../store';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from 'recharts';
@@ -51,6 +51,15 @@ const ReportsPage: React.FC = () => {
         lastPaymentAt: string;
     }>>([]);
     const [paymentReportError, setPaymentReportError] = useState('');
+    const [selectedPaymentCustomer, setSelectedPaymentCustomer] = useState<(typeof customerPayments)[number] | null>(null);
+    const [customerPaymentDetails, setCustomerPaymentDetails] = useState<Array<{
+        id: string;
+        amount: number;
+        paidVia: string;
+        notes: string;
+        timestamp: string;
+    }>>([]);
+    const [paymentDetailsLoading, setPaymentDetailsLoading] = useState(false);
 
     const loadCustomerPayments = async (filters: ReportFilters) => {
         try {
@@ -60,6 +69,67 @@ const ReportsPage: React.FC = () => {
         } catch (requestError: any) {
             setPaymentReportError(requestError.response?.data?.message || 'Failed to load customer payment report.');
         }
+    };
+
+    const openCustomerPaymentDetails = async (customer: (typeof customerPayments)[number]) => {
+        setSelectedPaymentCustomer(customer);
+        setPaymentDetailsLoading(true);
+        setPaymentReportError('');
+        try {
+            const response = await api.get('/reports/customer-payments/details', {
+                params: {
+                    ...generatedFilters,
+                    customerName: customer.customerName,
+                    customerCnic: customer.customerCnic,
+                },
+            });
+            setCustomerPaymentDetails(response.data || []);
+        } catch (requestError: any) {
+            setPaymentReportError(requestError.response?.data?.message || 'Failed to load payment details.');
+            setCustomerPaymentDetails([]);
+        } finally {
+            setPaymentDetailsLoading(false);
+        }
+    };
+
+    const closeCustomerPaymentDetails = () => {
+        setSelectedPaymentCustomer(null);
+        setCustomerPaymentDetails([]);
+    };
+
+    const downloadCustomerPaymentsReport = () => {
+        const escapeCsv = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+        const rows = selectedPaymentCustomer
+            ? [
+                ['Date', 'Customer', 'CNIC / ID', 'Amount Received', 'Paid Via', 'Notes'],
+                ...customerPaymentDetails.map((payment) => [
+                    new Date(payment.timestamp).toLocaleString(),
+                    selectedPaymentCustomer.customerName,
+                    selectedPaymentCustomer.customerCnic,
+                    payment.amount,
+                    payment.paidVia,
+                    payment.notes,
+                ]),
+            ]
+            : [
+                ['Customer', 'CNIC / ID', 'Payment Count', 'Last Payment', 'Total Received'],
+                ...customerPayments.map((customer) => [
+                    customer.customerName,
+                    customer.customerCnic,
+                    customer.paymentCount,
+                    new Date(customer.lastPaymentAt).toLocaleString(),
+                    customer.totalReceived,
+                ]),
+                ['TOTAL', '', '', '', totalCustomerPayments],
+            ];
+        const csv = rows.map((row) => row.map(escapeCsv).join(',')).join('\r\n');
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+        link.download = selectedPaymentCustomer
+            ? `${selectedPaymentCustomer.customerName}-payment-details.csv`
+            : `customer-payment-recovery-${generatedFilters.period}.csv`;
+        link.click();
+        URL.revokeObjectURL(link.href);
     };
 
     useEffect(() => {
@@ -75,6 +145,7 @@ const ReportsPage: React.FC = () => {
         dispatch(fetchTopSellingProducts(filters));
         loadCustomerPayments(filters);
         setGeneratedFilters(filters);
+        closeCustomerPaymentDetails();
     };
 
     const buildFilters = (): ReportFilters => (selectedPeriod === 'custom' ? { period: 'custom', from: fromDate, to: toDate } : { period: selectedPeriod });
@@ -407,25 +478,68 @@ const ReportsPage: React.FC = () => {
                 <Grid size={12}>
                     <Card sx={{ borderRadius: 4 }}>
                         <CardContent>
-                            <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={1} sx={{ mb: 2 }}>
+                            <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={2} sx={{ mb: 2 }}>
                                 <Box>
-                                    <Typography variant="h6" fontWeight={800}>Customer Payment Recovery</Typography>
+                                    <Stack direction="row" spacing={1} alignItems="center">
+                                        {selectedPaymentCustomer && (
+                                            <Button size="small" variant="outlined" startIcon={<ArrowLeft size={16} />} onClick={closeCustomerPaymentDetails}>
+                                                Go Back
+                                            </Button>
+                                        )}
+                                        <Typography variant="h6" fontWeight={800}>
+                                            {selectedPaymentCustomer ? `${selectedPaymentCustomer.customerName} - Payment Details` : 'Customer Payment Recovery'}
+                                        </Typography>
+                                    </Stack>
                                     <Typography variant="body2" color="text.secondary">
-                                        Customer-wise payments received for {reportHeading.toLowerCase()}.
+                                        {selectedPaymentCustomer
+                                            ? `Every payment received from this customer for ${reportHeading.toLowerCase()}.`
+                                            : `Customer-wise payments received for ${reportHeading.toLowerCase()}. Click a record to see details.`}
                                     </Typography>
                                 </Box>
+                                <Stack direction="row" spacing={2} alignItems="center">
+                                    <Button variant="contained" startIcon={<Download size={17} />} onClick={downloadCustomerPaymentsReport}>
+                                        Download Report
+                                    </Button>
                                 <Box sx={{ textAlign: { xs: 'left', sm: 'right' } }}>
                                     <Typography variant="caption" color="text.secondary">TOTAL PAYMENT RECEIVED</Typography>
                                     <Typography variant="h5" fontWeight={900} color="success.main">
-                                        {formatCurrency(totalCustomerPayments, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                        {formatCurrency(selectedPaymentCustomer?.totalReceived ?? totalCustomerPayments, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                                     </Typography>
                                     <Typography variant="caption" color="text.secondary">
-                                        From {customerPayments.length} customer{customerPayments.length === 1 ? '' : 's'}
+                                        {selectedPaymentCustomer
+                                            ? `${selectedPaymentCustomer.paymentCount} payment${selectedPaymentCustomer.paymentCount === 1 ? '' : 's'}`
+                                            : `From ${customerPayments.length} customer${customerPayments.length === 1 ? '' : 's'}`}
                                     </Typography>
                                 </Box>
+                                </Stack>
                             </Stack>
                             <TableContainer sx={{ overflowX: 'auto' }}>
                                 <Table sx={{ minWidth: 720 }}>
+                                    {selectedPaymentCustomer ? (
+                                        <>
+                                            <TableHead sx={{ bgcolor: 'rgba(0,0,0,0.02)' }}><TableRow>
+                                                <TableCell sx={{ fontWeight: 700 }}>DATE</TableCell>
+                                                <TableCell sx={{ fontWeight: 700 }}>PAID VIA</TableCell>
+                                                <TableCell sx={{ fontWeight: 700 }}>NOTES</TableCell>
+                                                <TableCell align="right" sx={{ fontWeight: 700 }}>AMOUNT RECEIVED</TableCell>
+                                            </TableRow></TableHead>
+                                            <TableBody>
+                                                {paymentDetailsLoading ? (
+                                                    <TableRow><TableCell colSpan={4} align="center" sx={{ py: 6 }}>Loading payment details...</TableCell></TableRow>
+                                                ) : customerPaymentDetails.map((payment) => (
+                                                    <TableRow key={payment.id} hover>
+                                                        <TableCell>{new Date(payment.timestamp).toLocaleString()}</TableCell>
+                                                        <TableCell sx={{ textTransform: 'capitalize' }}>{payment.paidVia}</TableCell>
+                                                        <TableCell>{payment.notes || '-'}</TableCell>
+                                                        <TableCell align="right" sx={{ fontWeight: 900, color: 'success.main' }}>
+                                                            {formatCurrency(payment.amount, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                                        </TableCell>
+                                                    </TableRow>
+                                                ))}
+                                            </TableBody>
+                                        </>
+                                    ) : (
+                                    <>
                                     <TableHead sx={{ bgcolor: 'rgba(0,0,0,0.02)' }}>
                                         <TableRow>
                                             <TableCell sx={{ fontWeight: 700 }}>CUSTOMER</TableCell>
@@ -441,7 +555,7 @@ const ReportsPage: React.FC = () => {
                                                 <Typography color="text.secondary">No customer payments received in this period.</Typography>
                                             </TableCell></TableRow>
                                         ) : customerPayments.map((row) => (
-                                            <TableRow key={`${row.customerName}-${row.customerCnic}`} hover>
+                                            <TableRow key={`${row.customerName}-${row.customerCnic}`} hover onClick={() => openCustomerPaymentDetails(row)} sx={{ cursor: 'pointer' }}>
                                                 <TableCell sx={{ fontWeight: 800 }}>{row.customerName}</TableCell>
                                                 <TableCell>{row.customerCnic || '-'}</TableCell>
                                                 <TableCell>{row.paymentCount}</TableCell>
@@ -452,6 +566,8 @@ const ReportsPage: React.FC = () => {
                                             </TableRow>
                                         ))}
                                     </TableBody>
+                                    </>
+                                    )}
                                 </Table>
                             </TableContainer>
                         </CardContent>

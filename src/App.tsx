@@ -27,6 +27,7 @@ const ProductUnitsPage = React.lazy(() => import('./pages/Inventory/ProductUnits
 const POSTerminal = React.lazy(() => import('./pages/POS/POSTerminal'));
 const TransactionHistory = React.lazy(() => import('./pages/Transactions/TransactionHistory'));
 const ReportsPage = React.lazy(() => import('./pages/Reports/ReportsPage'));
+const TodaysCollectionPage = React.lazy(() => import('./pages/Collections/TodaysCollectionPage'));
 const Signup = React.lazy(() => import('./pages/Auth/Signup'));
 const OrderDesk = React.lazy(() => import('./pages/Orders/OrderDesk'));
 const SettingsPage = React.lazy(() => import('./pages/Settings/SettingsPage'));
@@ -98,6 +99,7 @@ const AppContent: React.FC = () => {
               } />
               <Route path="transactions" element={<TransactionHistory />} />
               <Route path="reports" element={<ReportsPage />} />
+              <Route path="todays-collection" element={<TodaysCollectionPage />} />
               <Route path="notes" element={
                 <ProtectedRoute allowedRoles={['super_admin', 'admin', 'user']}>
                   <StickyNotes />
