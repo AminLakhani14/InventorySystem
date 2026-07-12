@@ -8,7 +8,7 @@ import AppDatePicker from '../../components/Common/AppDatePicker';
 
 interface CollectionData {
     summary: { todaysCollection: number; cashCollection: number; creditCollection: number; salesRevenue: number; totalOutstanding: number; customerCount: number; transactionCount: number };
-    customers: Array<{ customerName: string; customerCnic: string; customerType: 'cash' | 'credit' | 'cash-and-credit'; cashCollection: number; creditCollection: number; totalCollection: number; salesAmount: number; transactions: number }>;
+    customers: Array<{ customerName: string; customerCnic: string; customerType: 'cash' | 'credit' | 'cash-and-credit'; cashCollection: number; creditCollection: number; totalCollection: number; salesAmount: number; remainingAmount: number; transactions: number }>;
     last7Days: Array<{ _id: string; amount: number }>;
     last7Months: Array<{ _id: string; amount: number }>;
 }
@@ -69,12 +69,12 @@ const TodaysCollectionPage: React.FC = () => {
                             <TableHead><TableRow><TableCell>TIME</TableCell><TableCell>RECORD</TableCell><TableCell>DESCRIPTION</TableCell><TableCell>METHOD</TableCell><TableCell>SALE AMOUNT</TableCell><TableCell align="right">COLLECTED</TableCell></TableRow></TableHead>
                             <TableBody>{details.map((row) => <TableRow key={row.id} hover><TableCell>{new Date(row.timestamp).toLocaleTimeString()}</TableCell><TableCell><Chip size="small" label={row.recordType} color={row.recordType === 'recovery' ? 'success' : 'primary'} /></TableCell><TableCell>{row.description}</TableCell><TableCell sx={{ textTransform: 'capitalize' }}>{row.paymentMethod}</TableCell><TableCell>{formatCurrency(row.saleAmount)}</TableCell><TableCell align="right" sx={{ fontWeight: 900, color: 'success.main' }}>{formatCurrency(row.amount)}</TableCell></TableRow>)}</TableBody>
                         </> : <>
-                        <TableHead><TableRow><TableCell>CUSTOMER</TableCell><TableCell>TYPE</TableCell><TableCell>SALES</TableCell><TableCell>CASH</TableCell><TableCell>CREDIT RECOVERY</TableCell><TableCell align="right">TOTAL COLLECTION</TableCell></TableRow></TableHead>
+                        <TableHead><TableRow><TableCell>CUSTOMER</TableCell><TableCell>TYPE</TableCell><TableCell>SALES</TableCell><TableCell>CASH RECEIVED</TableCell><TableCell>CREDIT PAID</TableCell><TableCell>REMAINING</TableCell><TableCell align="right">TOTAL COLLECTION</TableCell></TableRow></TableHead>
                         <TableBody>{data.customers.length ? data.customers.map((row) => <TableRow key={`${row.customerName}-${row.customerCnic}`} hover onClick={() => openCustomer(row)} sx={{ cursor: 'pointer' }}>
                             <TableCell><Typography fontWeight={800}>{row.customerName}</Typography><Typography variant="caption" color="text.secondary">{row.customerCnic || 'No ID'} · {row.transactions} transaction(s)</Typography></TableCell>
                             <TableCell><Chip size="small" label={row.customerType === 'cash-and-credit' ? 'Cash & Credit' : row.customerType} color={row.customerType === 'credit' ? 'warning' : row.customerType === 'cash' ? 'success' : 'primary'} sx={{ textTransform: 'capitalize', fontWeight: 700 }} /></TableCell>
-                            <TableCell>{formatCurrency(row.salesAmount)}</TableCell><TableCell>{formatCurrency(row.cashCollection)}</TableCell><TableCell>{formatCurrency(row.creditCollection)}</TableCell><TableCell align="right" sx={{ fontWeight: 900, color: 'success.main' }}>{formatCurrency(row.totalCollection)}</TableCell>
-                        </TableRow>) : <TableRow><TableCell colSpan={6} align="center" sx={{ py: 7 }}>No collection records for this date.</TableCell></TableRow>}</TableBody></>}
+                            <TableCell>{formatCurrency(row.salesAmount)}</TableCell><TableCell sx={{ color: 'success.main', fontWeight: 700 }}>{formatCurrency(row.cashCollection)}</TableCell><TableCell sx={{ color: 'primary.main', fontWeight: 700 }}>{formatCurrency(row.creditCollection)}</TableCell><TableCell sx={{ color: row.remainingAmount > 0 ? 'warning.main' : 'success.main', fontWeight: 700 }}>{formatCurrency(row.remainingAmount)}</TableCell><TableCell align="right" sx={{ fontWeight: 900, color: 'success.main' }}>{formatCurrency(row.totalCollection)}</TableCell>
+                        </TableRow>) : <TableRow><TableCell colSpan={7} align="center" sx={{ py: 7 }}>No collection records for this date.</TableCell></TableRow>}</TableBody></>}
                     </Table></TableContainer>
                 </CardContent></Card>
             </Grid>

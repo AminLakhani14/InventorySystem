@@ -28,6 +28,7 @@ import { useSelector } from 'react-redux';
 import type { RootState } from '../../store';
 import { getRegionalIdLabel } from '../../lib/regional';
 import AppDatePicker from '../../components/Common/AppDatePicker';
+import { Download, Printer, Search, Share2 } from 'lucide-react';
 
 interface InstallmentScheduleItem {
     installmentNumber: number;
@@ -68,13 +69,33 @@ interface InstallmentPlan {
     source?: 'installment' | 'closing-balance';
 }
 
+interface PaymentHistoryItem {
+    id: string;
+    source: 'installment' | 'balance';
+    timestamp: string;
+    customerName: string;
+    customerCnic: string;
+    description: string;
+    amount: number;
+    paidVia: 'cash' | 'card';
+    notes: string;
+    remainingAmount: number;
+}
+
 const todayDateInput = () => new Date().toISOString().split('T')[0];
+
+const escapePdfText = (value: string) => value
+    .replace(/[^\x20-\x7E]/g, '?')
+    .replace(/\\/g, '\\\\')
+    .replace(/\(/g, '\\(')
+    .replace(/\)/g, '\\)');
 
 const InstallmentsPage: React.FC = () => {
     const { formatCurrency, currencySymbol } = useAppCurrency();
     const { country } = useSelector((state: RootState) => state.settings);
     const regionalIdLabel = getRegionalIdLabel(country);
     const [plans, setPlans] = useState<InstallmentPlan[]>([]);
+    const [paymentHistory, setPaymentHistory] = useState<PaymentHistoryItem[]>([]);
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
     const [selectedPlan, setSelectedPlan] = useState<InstallmentPlan | null>(null);
@@ -85,13 +106,20 @@ const InstallmentsPage: React.FC = () => {
     const [balancePaymentDate, setBalancePaymentDate] = useState(todayDateInput());
     const [saving, setSaving] = useState(false);
     const [success, setSuccess] = useState('');
+    const [searchTerm, setSearchTerm] = useState('');
+    const [fromDate, setFromDate] = useState('');
+    const [toDate, setToDate] = useState('');
 
     const loadPlans = async () => {
         setLoading(true);
         setError('');
         try {
-            const response = await api.get('/installments');
-            setPlans(response.data || []);
+            const [plansResponse, paymentsResponse] = await Promise.all([
+                api.get('/installments'),
+                api.get('/installments/payments'),
+            ]);
+            setPlans(plansResponse.data || []);
+            setPaymentHistory(paymentsResponse.data || []);
         } catch (fetchError: any) {
             setError(fetchError.response?.data?.message || 'Unable to load installment plans.');
         } finally {
@@ -106,7 +134,111 @@ const InstallmentsPage: React.FC = () => {
         return () => window.removeEventListener('itemhive-installments-updated', refresh);
     }, []);
 
-    const activePlans = useMemo(() => plans.filter((plan) => plan.status === 'active'), [plans]);
+    const activePlans = useMemo(() => {
+        const query = searchTerm.trim().toLowerCase();
+
+        return plans
+            .filter((plan) => plan.status === 'active')
+            .filter((plan) => {
+                const saleDate = new Date(plan.saleDate);
+                if (fromDate && saleDate < new Date(`${fromDate}T00:00:00`)) return false;
+                if (toDate && saleDate > new Date(`${toDate}T23:59:59.999`)) return false;
+                return true;
+            })
+            .filter((plan) => {
+                if (!query) return true;
+                return [
+                    plan.customerName,
+                    plan.customerCnic,
+                    plan.customerPhone,
+                    plan.customerAddress,
+                    plan.productName,
+                    plan.installmentMonths,
+                    plan.totalAmount,
+                    plan.paidAmount,
+                    plan.remainingAmount,
+                    new Date(plan.saleDate).toLocaleDateString(),
+                ].join(' ').toLowerCase().includes(query);
+            });
+    }, [plans, searchTerm, fromDate, toDate]);
+
+    const exportToExcel = () => {
+        const escapeCsv = (value: string | number) => `"${String(value).replace(/"/g, '""')}"`;
+        const rows = activePlans.map((plan) => [
+            plan.customerName,
+            plan.customerCnic,
+            plan.customerPhone,
+            plan.productName,
+            plan.installmentMonths ? `${plan.installmentMonths} months` : 'Manual balance',
+            plan.totalAmount,
+            plan.paidAmount,
+            plan.remainingAmount,
+            plan.schedule.find((item) => item.status === 'pending')?.dueDate || '',
+        ]);
+        const csv = [
+            ['Customer', 'Customer ID', 'Contact', 'Product', 'Term', 'Total', 'Paid', 'Remaining', 'Next Due'],
+            ...rows,
+        ].map((row) => row.map(escapeCsv).join(',')).join('\n');
+        const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `installments-${todayDateInput()}.csv`;
+        link.click();
+        URL.revokeObjectURL(url);
+    };
+
+    const buildPaymentPdf = (payment: PaymentHistoryItem) => {
+        const lines = [
+            'ITEMHIVE - PAYMENT RECEIPT',
+            `Date: ${new Date(payment.timestamp).toLocaleString()}`,
+            `Customer: ${payment.customerName}`,
+            `Customer ID: ${payment.customerCnic || 'N/A'}`,
+            `Payment: ${payment.description}`,
+            `Amount Received: ${formatCurrency(payment.amount, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`,
+            `Paid Via: ${payment.paidVia}`,
+            `Remaining Balance: ${formatCurrency(payment.remainingAmount, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`,
+            payment.notes ? `Notes: ${payment.notes}` : '',
+        ].filter(Boolean);
+        const stream = lines.map((line, index) => `BT /F${index === 0 ? '2' : '1'} ${index === 0 ? 18 : 12} Tf 54 ${790 - index * 35} Td (${escapePdfText(line)}) Tj ET`).join('\n');
+        const objects = [
+            '<< /Type /Catalog /Pages 2 0 R >>',
+            '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+            '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>',
+            '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+            '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>',
+            `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+        ];
+        let pdf = '%PDF-1.4\n';
+        const offsets = [0];
+        objects.forEach((object, index) => {
+            offsets.push(pdf.length);
+            pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+        });
+        const xrefOffset = pdf.length;
+        pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+        offsets.slice(1).forEach((offset) => { pdf += `${String(offset).padStart(10, '0')} 00000 n \n`; });
+        pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+        return new Blob([pdf], { type: 'application/pdf' });
+    };
+
+    const sharePaymentPdf = async (payment: PaymentHistoryItem) => {
+        const fileName = `payment-receipt-${payment.customerName.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-${new Date(payment.timestamp).toISOString().slice(0, 10)}.pdf`;
+        const file = new File([buildPaymentPdf(payment)], fileName, { type: 'application/pdf' });
+        if (navigator.share && navigator.canShare?.({ files: [file] })) {
+            try {
+                await navigator.share({ title: 'Payment Receipt', files: [file] });
+                return;
+            } catch (shareError: any) {
+                if (shareError?.name === 'AbortError') return;
+            }
+        }
+        const url = URL.createObjectURL(file);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = fileName;
+        link.click();
+        URL.revokeObjectURL(url);
+    };
 
     const handleOpenPayment = (plan: InstallmentPlan) => {
         const nextPending = plan.schedule.find((item) => item.status === 'pending');
@@ -200,11 +332,57 @@ const InstallmentsPage: React.FC = () => {
                 <Grid size={12}>
                     <Card sx={{ borderRadius: 4, overflow: 'hidden' }}>
                         <CardContent sx={{ p: 0 }}>
+                            <Box
+                                sx={{
+                                    p: 2.5,
+                                    display: 'flex',
+                                    gap: 1.5,
+                                    alignItems: 'center',
+                                    flexWrap: 'wrap',
+                                    borderBottom: '1px solid',
+                                    borderColor: 'divider',
+                                }}
+                            >
+                                <TextField
+                                    size="small"
+                                    placeholder="Search customer, contact, product, amount..."
+                                    value={searchTerm}
+                                    onChange={(event) => setSearchTerm(event.target.value)}
+                                    InputProps={{
+                                        startAdornment: (
+                                            <InputAdornment position="start">
+                                                <Search size={18} />
+                                            </InputAdornment>
+                                        ),
+                                    }}
+                                    sx={{ minWidth: { xs: '100%', sm: 340 } }}
+                                />
+                                <AppDatePicker size="small" label="From" value={fromDate} onChange={setFromDate} maxDate={toDate || undefined} />
+                                <AppDatePicker size="small" label="To" value={toDate} onChange={setToDate} minDate={fromDate || undefined} />
+                                {(searchTerm || fromDate || toDate) && (
+                                    <Button
+                                        size="small"
+                                        onClick={() => {
+                                            setSearchTerm('');
+                                            setFromDate('');
+                                            setToDate('');
+                                        }}
+                                        sx={{ fontWeight: 800 }}
+                                    >
+                                        Clear Filters
+                                    </Button>
+                                )}
+                                <Button variant="outlined" size="small" startIcon={<Download size={17} />} onClick={exportToExcel} sx={{ fontWeight: 800, ml: 'auto' }}>
+                                    Export Excel
+                                </Button>
+                                <Button variant="outlined" size="small" startIcon={<Printer size={17} />} onClick={() => window.print()} sx={{ fontWeight: 800 }}>
+                                    Print
+                                </Button>
+                            </Box>
                             <TableContainer sx={{ overflowX: 'auto' }}>
-                                <Table sx={{ minWidth: 1260 }}>
+                                <Table sx={{ minWidth: 1120 }}>
                                     <TableHead>
                                         <TableRow>
-                                            <TableCell sx={{ fontWeight: 700 }}>PLAN</TableCell>
                                             <TableCell sx={{ fontWeight: 700 }}>CUSTOMER</TableCell>
                                             <TableCell sx={{ fontWeight: 700 }}>CONTACT</TableCell>
                                             <TableCell sx={{ fontWeight: 700 }}>PRODUCT</TableCell>
@@ -219,7 +397,7 @@ const InstallmentsPage: React.FC = () => {
                                     <TableBody>
                                         {activePlans.length === 0 ? (
                                             <TableRow>
-                                                <TableCell colSpan={10} align="center" sx={{ py: 8 }}>
+                                                <TableCell colSpan={9} align="center" sx={{ py: 8 }}>
                                                     <Typography color="text.secondary">
                                                         {loading ? 'Loading installment plans...' : 'No active installment plans right now.'}
                                                     </Typography>
@@ -235,14 +413,11 @@ const InstallmentsPage: React.FC = () => {
                                                 return (
                                                     <TableRow key={plan.planCode} hover>
                                                         <TableCell>
-                                                            <Typography variant="body2" fontWeight={800}>{plan.planCode}</Typography>
-                                                            <Typography variant="caption" color="text.secondary">
-                                                                {isClosingBalance ? 'Balance' : 'Sale'}: {new Date(plan.saleDate).toLocaleDateString()}
-                                                            </Typography>
-                                                        </TableCell>
-                                                        <TableCell>
                                                             <Typography variant="body2" fontWeight={700}>{plan.customerName}</Typography>
                                                             <Typography variant="caption" color="text.secondary">{plan.customerCnic}</Typography>
+                                                            <Typography variant="caption" color="text.secondary" display="block">
+                                                                {isClosingBalance ? 'Balance' : 'Sale'}: {new Date(plan.saleDate).toLocaleDateString()}
+                                                            </Typography>
                                                         </TableCell>
                                                         <TableCell>
                                                             <Typography variant="body2">{plan.customerPhone}</Typography>
@@ -313,6 +488,48 @@ const InstallmentsPage: React.FC = () => {
                                                 );
                                             })
                                         )}
+                                    </TableBody>
+                                </Table>
+                            </TableContainer>
+                        </CardContent>
+                    </Card>
+                </Grid>
+                <Grid size={12}>
+                    <Card sx={{ borderRadius: 4, overflow: 'hidden' }}>
+                        <CardContent sx={{ p: 0 }}>
+                            <Box sx={{ p: 2.5, borderBottom: '1px solid', borderColor: 'divider' }}>
+                                <Typography variant="h6" fontWeight={800}>Received Installment Payments</Typography>
+                                <Typography variant="body2" color="text.secondary">Every received installment and credit-balance payment. Use the PDF action to share a receipt.</Typography>
+                            </Box>
+                            <TableContainer sx={{ overflowX: 'auto' }}>
+                                <Table sx={{ minWidth: 1060 }} size="small">
+                                    <TableHead>
+                                        <TableRow>
+                                            <TableCell sx={{ fontWeight: 700 }}>DATE</TableCell>
+                                            <TableCell sx={{ fontWeight: 700 }}>CUSTOMER</TableCell>
+                                            <TableCell sx={{ fontWeight: 700 }}>PAYMENT</TableCell>
+                                            <TableCell sx={{ fontWeight: 700 }}>PAID VIA</TableCell>
+                                            <TableCell sx={{ fontWeight: 700 }}>RECEIVED</TableCell>
+                                            <TableCell sx={{ fontWeight: 700 }}>REMAINING</TableCell>
+                                            <TableCell sx={{ fontWeight: 700 }}>NOTES</TableCell>
+                                            <TableCell align="right" sx={{ fontWeight: 700 }}>PDF</TableCell>
+                                        </TableRow>
+                                    </TableHead>
+                                    <TableBody>
+                                        {paymentHistory.length === 0 ? (
+                                            <TableRow><TableCell colSpan={8} align="center" sx={{ py: 6 }}><Typography color="text.secondary">No installment payments received yet.</Typography></TableCell></TableRow>
+                                        ) : paymentHistory.map((payment) => (
+                                            <TableRow key={payment.id} hover>
+                                                <TableCell>{new Date(payment.timestamp).toLocaleString()}</TableCell>
+                                                <TableCell><Typography fontWeight={700}>{payment.customerName}</Typography><Typography variant="caption" color="text.secondary">{payment.customerCnic || 'No ID'}</Typography></TableCell>
+                                                <TableCell>{payment.description}</TableCell>
+                                                <TableCell sx={{ textTransform: 'capitalize' }}>{payment.paidVia}</TableCell>
+                                                <TableCell sx={{ color: 'success.main', fontWeight: 800 }}>{formatCurrency(payment.amount, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</TableCell>
+                                                <TableCell sx={{ color: payment.remainingAmount > 0 ? 'warning.main' : 'success.main', fontWeight: 800 }}>{formatCurrency(payment.remainingAmount, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</TableCell>
+                                                <TableCell>{payment.notes || '-'}</TableCell>
+                                                <TableCell align="right"><Button size="small" variant="outlined" startIcon={<Share2 size={15} />} onClick={() => void sharePaymentPdf(payment)}>PDF</Button></TableCell>
+                                            </TableRow>
+                                        ))}
                                     </TableBody>
                                 </Table>
                             </TableContainer>

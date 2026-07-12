@@ -182,6 +182,19 @@ export const inventoryRequestDecisionSchema = Joi.object({
     decisionNote: Joi.string().allow('').optional(),
 });
 
+export const purchaseOrderSchema = Joi.object({
+    vendorName: Joi.string().trim().min(2).max(120).required(),
+    vehicleNumber: Joi.string().trim().min(2).max(60).required(),
+    vehicleRent: Joi.number().min(0).required(),
+    items: Joi.array().min(1).items(
+        Joi.object({
+            productId: Joi.string().required(),
+            quantity: Joi.number().positive().required(),
+            unitPurchasePrice: Joi.number().min(0).required(),
+        })
+    ).required(),
+});
+
 export const noteCreateSchema = Joi.object({
     title: Joi.string().allow('').optional(),
     body: Joi.string().allow('').optional(),

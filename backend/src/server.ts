@@ -14,6 +14,7 @@ import installmentRoutes from './routes/installmentRoutes';
 import settingsRoutes from './routes/settingsRoutes';
 import userRoutes from './routes/userRoutes';
 import inventoryRequestRoutes from './routes/inventoryRequestRoutes';
+import purchaseOrderRoutes from './routes/purchaseOrderRoutes';
 import notesRoutes from './routes/notesRoutes';
 import signupRequestRoutes from './routes/signupRequestRoutes';
 import customerRoutes from './routes/customerRoutes';
@@ -109,6 +110,7 @@ app.use('/api/installments', installmentRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/inventory-requests', inventoryRequestRoutes);
+app.use('/api/purchase-orders', purchaseOrderRoutes);
 app.use('/api/signup-requests', signupRequestRoutes);
 app.use('/api/notes', notesRoutes);
 

@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import Transaction from '../models/Transaction';
 import Product from '../models/Product';
 import CreditPayment from '../models/CreditPayment';
+import Customer from '../models/Customer';
 import type { AuthRequest } from '../middleware/auth';
 import { buildTenantFilter } from '../utils/tenancy';
 
@@ -206,29 +207,45 @@ export const getCollectionsDashboard = async (req: AuthRequest, res: Response) =
         const sevenMonthsStart = startOfDay(new Date(selectedDate));
         sevenMonthsStart.setMonth(sevenMonthsStart.getMonth() - 6, 1);
 
-        const [sales, recoveries, outstandingRows, sevenDayRecoveries, sevenMonthRecoveries] = await Promise.all([
+        const [sales, recoveries, creditSales, allPayments, customerBalances, sevenDayPayments, sevenDayOrderCreditPayments, sevenMonthPayments, sevenMonthOrderCreditPayments] = await Promise.all([
             Transaction.find({ ...tenant, type: 'reduction', timestamp: { $gte: dayStart, $lte: dayEnd } }).lean(),
             CreditPayment.find({ ...tenant, timestamp: { $gte: dayStart, $lte: dayEnd } }).lean(),
-            Transaction.aggregate([
-                { $match: { ...tenant, type: 'reduction', paymentMethod: 'credit' } },
-                { $group: { _id: null, issued: { $sum: '$dueAmount' } } },
-            ]),
-            CreditPayment.aggregate([
-                { $match: { ...tenant, timestamp: { $gte: sevenDaysStart, $lte: dayEnd } } },
-                { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$timestamp' } }, amount: { $sum: { $ifNull: ['$receivedAmount', '$amount'] } } } },
-                { $sort: { _id: 1 } },
-            ]),
-            CreditPayment.aggregate([
-                { $match: { ...tenant, timestamp: { $gte: sevenMonthsStart, $lte: dayEnd } } },
-                { $group: { _id: { $dateToString: { format: '%Y-%m', date: '$timestamp' } }, amount: { $sum: { $ifNull: ['$receivedAmount', '$amount'] } } } },
-                { $sort: { _id: 1 } },
-            ]),
+            Transaction.find({ ...tenant, type: 'reduction', paymentMethod: 'credit', dueAmount: { $gt: 0 } })
+                .select('customerName customerCnic dueAmount')
+                .lean(),
+            CreditPayment.find(tenant).select('customerName customerCnic amount').lean(),
+            Customer.find({ ...tenant, amount: { $gt: 0 } }).select('fullName cnic amount').lean(),
+            CreditPayment.find({ ...tenant, timestamp: { $gte: sevenDaysStart, $lte: dayEnd }, notes: { $ne: 'Adjusted from Order Desk overpayment.' } }).select('timestamp amount receivedAmount').lean(),
+            Transaction.find({ ...tenant, type: 'reduction', creditPaid: { $gt: 0 }, timestamp: { $gte: sevenDaysStart, $lte: dayEnd } }).select('timestamp creditPaid').lean(),
+            CreditPayment.find({ ...tenant, timestamp: { $gte: sevenMonthsStart, $lte: dayEnd }, notes: { $ne: 'Adjusted from Order Desk overpayment.' } }).select('timestamp amount receivedAmount').lean(),
+            Transaction.find({ ...tenant, type: 'reduction', creditPaid: { $gt: 0 }, timestamp: { $gte: sevenMonthsStart, $lte: dayEnd } }).select('timestamp creditPaid').lean(),
         ]);
 
-        const allRecovered = await CreditPayment.aggregate([
-            { $match: tenant },
-            { $group: { _id: null, amount: { $sum: '$amount' } } },
-        ]);
+        const buildRecoverySeries = (payments: any[], orderPayments: any[], format: 'day' | 'month') => {
+            const totals = new Map<string, number>();
+            const add = (timestamp: Date, amount: number) => {
+                const date = new Date(timestamp);
+                const key = format === 'day'
+                    ? date.toISOString().slice(0, 10)
+                    : date.toISOString().slice(0, 7);
+                totals.set(key, Number((totals.get(key) || 0) + amount));
+            };
+            payments.forEach((payment) => add(payment.timestamp, Number(payment.receivedAmount ?? payment.amount ?? 0)));
+            orderPayments.forEach((payment) => add(payment.timestamp, Number(payment.creditPaid || 0)));
+            return Array.from(totals, ([_id, amount]) => ({ _id, amount })).sort((a, b) => a._id.localeCompare(b._id));
+        };
+        const sevenDayRecoveries = buildRecoverySeries(sevenDayPayments, sevenDayOrderCreditPayments, 'day');
+        const sevenMonthRecoveries = buildRecoverySeries(sevenMonthPayments, sevenMonthOrderCreditPayments, 'month');
+
+        const outstandingByCustomer = new Map<string, number>();
+        const addOutstanding = (name: string, cnic: string, amount: number) => {
+            const key = `${name.toLowerCase()}::${cnic.toLowerCase()}`;
+            outstandingByCustomer.set(key, Number((outstandingByCustomer.get(key) || 0) + amount));
+        };
+        creditSales.forEach((sale) => addOutstanding(sale.customerName || '', sale.customerCnic || '', Number(sale.dueAmount || 0)));
+        customerBalances.forEach((customer) => addOutstanding(customer.fullName, customer.cnic || '', Number(customer.amount || 0)));
+        allPayments.forEach((payment) => addOutstanding(payment.customerName, payment.customerCnic || '', -Number(payment.amount || 0)));
+
         const customerMap = new Map<string, any>();
         sales.forEach((sale) => {
             const name = sale.customerName || 'Walk-in Customer';
@@ -238,7 +255,8 @@ export const getCollectionsDashboard = async (req: AuthRequest, res: Response) =
             row.salesAmount += Number(sale.totalPrice || 0);
             row.transactions += 1;
             if (sale.paymentMethod === 'credit') {
-                row.creditCollection += Number(sale.paidNow || 0);
+                row.cashCollection += Number(sale.paidNow || 0);
+                row.creditCollection += Number(sale.creditPaid || 0);
                 row.methods.add('credit');
             } else {
                 row.cashCollection += Number(sale.totalPrice || 0);
@@ -249,12 +267,17 @@ export const getCollectionsDashboard = async (req: AuthRequest, res: Response) =
         recoveries.forEach((payment) => {
             const key = `${payment.customerName.toLowerCase()}::${(payment.customerCnic || '').toLowerCase()}`;
             const row = customerMap.get(key) || { customerName: payment.customerName, customerCnic: payment.customerCnic || '', cashCollection: 0, creditCollection: 0, salesAmount: 0, transactions: 0, methods: new Set<string>() };
-            row.creditCollection += Number(payment.receivedAmount ?? payment.amount ?? 0);
+            // An Order Desk overpayment is already recorded on the sale as
+            // creditPaid. Do not count its companion payment record twice.
+            if (payment.notes !== 'Adjusted from Order Desk overpayment.') {
+                row.creditCollection += Number(payment.receivedAmount ?? payment.amount ?? 0);
+            }
             row.methods.add('credit');
             customerMap.set(key, row);
         });
         const customers = Array.from(customerMap.values()).map((row) => ({
             ...row,
+            remainingAmount: Math.max(outstandingByCustomer.get(`${row.customerName.toLowerCase()}::${row.customerCnic.toLowerCase()}`) || 0, 0),
             customerType: row.methods.size > 1 ? 'cash-and-credit' : row.methods.has('credit') ? 'credit' : 'cash',
             totalCollection: row.cashCollection + row.creditCollection,
             methods: undefined,
@@ -270,7 +293,7 @@ export const getCollectionsDashboard = async (req: AuthRequest, res: Response) =
                 cashCollection,
                 creditCollection,
                 salesRevenue,
-                totalOutstanding: Math.max(Number(outstandingRows[0]?.issued || 0) - Number(allRecovered[0]?.amount || 0), 0),
+                totalOutstanding: Array.from(outstandingByCustomer.values()).reduce((sum, amount) => sum + Math.max(amount, 0), 0),
                 customerCount: customers.length,
                 transactionCount: sales.length,
             },
@@ -300,7 +323,12 @@ export const getCollectionCustomerDetails = async (req: AuthRequest, res: Respon
         ]);
         res.json([
             ...sales.map((sale) => ({ id: sale._id, timestamp: sale.timestamp, recordType: 'sale', description: sale.productName, paymentMethod: sale.paymentMethod, amount: sale.paymentMethod === 'credit' ? Number(sale.paidNow || 0) : Number(sale.totalPrice || 0), saleAmount: sale.totalPrice })),
-            ...payments.map((payment) => ({ id: payment._id, timestamp: payment.timestamp, recordType: 'recovery', description: payment.notes || 'Credit payment received', paymentMethod: payment.paidVia, amount: Number(payment.receivedAmount ?? payment.amount ?? 0), saleAmount: 0 })),
+            ...sales
+                .filter((sale) => Number(sale.creditPaid || 0) > 0)
+                .map((sale) => ({ id: `${sale._id}-credit-payment`, timestamp: sale.timestamp, recordType: 'recovery', description: 'Paid toward previous credit', paymentMethod: sale.paidVia || 'cash', amount: Number(sale.creditPaid || 0), saleAmount: 0 })),
+            ...payments
+                .filter((payment) => payment.notes !== 'Adjusted from Order Desk overpayment.')
+                .map((payment) => ({ id: payment._id, timestamp: payment.timestamp, recordType: 'recovery', description: payment.notes || 'Credit payment received', paymentMethod: payment.paidVia, amount: Number(payment.receivedAmount ?? payment.amount ?? 0), saleAmount: 0 })),
         ].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
     } catch (error: any) {
         res.status(500).json({ message: error.message || 'Failed to load customer collection details' });

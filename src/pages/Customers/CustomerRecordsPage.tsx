@@ -529,13 +529,14 @@ const CustomerRecordsPage: React.FC = () => {
             </Box>
 
             <TableContainer sx={{ overflowX: "auto" }}>
-              <Table sx={{ minWidth: 1060 }}>
+              <Table sx={{ minWidth: 1280 }}>
                 <TableHead>
                   <TableRow>
                     <TableCell sx={{ fontWeight: 900 }}>CUSTOMER</TableCell>
                     <TableCell sx={{ fontWeight: 900 }}>
                       LAST PURCHASE
                     </TableCell>
+                    <TableCell sx={{ fontWeight: 900 }}>BUYING DAYS</TableCell>
                     <TableCell sx={{ fontWeight: 900 }}>TOTAL QTY</TableCell>
                     <TableCell sx={{ fontWeight: 900 }}>TOTAL AMOUNT</TableCell>
                     <TableCell sx={{ fontWeight: 900 }}>RECEIVED</TableCell>
@@ -552,7 +553,7 @@ const CustomerRecordsPage: React.FC = () => {
                 <TableBody>
                   {filteredRecords.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7}>
+                      <TableCell colSpan={8}>
                         <Box
                           sx={{
                             py: 5,
@@ -609,6 +610,24 @@ const CustomerRecordsPage: React.FC = () => {
                                 record.lastPurchaseAt,
                               ).toLocaleDateString()
                             : "-"}
+                        </TableCell>
+                        <TableCell>
+                          <Stack spacing={0.5}>
+                            {record.days.map((day) => (
+                              <Typography
+                                key={day.dateKey}
+                                variant="caption"
+                                sx={{ whiteSpace: "nowrap" }}
+                              >
+                                <Box component="span" sx={{ fontWeight: 800 }}>
+                                  {formatCurrency(day.totalAmount, {
+                                    minimumFractionDigits: 0,
+                                    maximumFractionDigits: 0,
+                                  })}
+                                </Box>
+                              </Typography>
+                            ))}
+                          </Stack>
                         </TableCell>
                         <TableCell sx={{ fontWeight: 900 }}>
                           {record.totalQuantity}

@@ -19,17 +19,13 @@ import {
     Package,
     History,
     BarChart3,
-    Monitor as TerminalIcon,
     ClipboardList,
     WalletCards,
     CalendarClock,
-    Pin,
     Users,
     Contact,
     ReceiptText,
-    UserPlus,
     ClipboardCheck,
-    Scale,
     HandCoins,
     ChevronLeft,
     ChevronRight
@@ -61,10 +57,8 @@ const Sidebar: React.FC<SidebarProps> = ({ mobileOpen, onDrawerToggle }) => {
 
     const menuItems = [
         { text: 'Dashboard', icon: <LayoutDashboard size={20} />, path: '/', roles: ['super_admin', 'admin', 'user'] },
-        { text: 'POS Terminal', icon: <TerminalIcon size={20} />, path: '/pos', roles: ['super_admin', 'admin', 'user'] },
         { text: 'Inventory', icon: <Package size={20} />, path: '/inventory', roles: ['super_admin', 'admin', 'user'] },
-        { text: 'Product Units', icon: <Scale size={20} />, path: '/inventory/units', roles: ['super_admin', 'admin', 'user'] },
-        { text: 'Inventory Requests', icon: <ClipboardCheck size={20} />, path: '/inventory/requests', roles: ['super_admin', 'admin', 'user'] },
+        { text: 'Purchase Orders', icon: <ClipboardCheck size={20} />, path: '/inventory/purchase-orders', roles: ['super_admin', 'admin'] },
         { text: 'Order Desk', icon: <ClipboardList size={20} />, path: '/orders', roles: ['super_admin', 'admin', 'user'] },
         { text: 'Transactions', icon: <History size={20} />, path: '/transactions', roles: ['super_admin', 'admin', 'user'] },
         { text: 'Customers', icon: <Contact size={20} />, path: '/customers', roles: ['super_admin', 'admin', 'user'] },
@@ -74,8 +68,6 @@ const Sidebar: React.FC<SidebarProps> = ({ mobileOpen, onDrawerToggle }) => {
         { text: 'Reports', icon: <BarChart3 size={20} />, path: '/reports', roles: ['super_admin', 'admin'] },
         { text: "Today's Collection", icon: <HandCoins size={20} />, path: '/todays-collection', roles: ['super_admin', 'admin'] },
         { text: 'Team', icon: <Users size={20} />, path: '/team', roles: ['super_admin', 'admin'] },
-        { text: 'Signup Requests', icon: <UserPlus size={20} />, path: '/signup-requests', roles: ['super_admin'] },
-        { text: 'Sticky Notes', icon: <Pin size={20} />, path: '/notes', roles: ['super_admin', 'admin', 'user'] },
     ];
 
     const drawer = (

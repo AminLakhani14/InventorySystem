@@ -148,6 +148,86 @@ export const getInstallmentPlans = async (req: AuthRequest, res: Response) => {
     }
 };
 
+export const getInstallmentPaymentHistory = async (req: AuthRequest, res: Response) => {
+    try {
+        const tenantFilter = buildTenantFilter(req.user!);
+        const [plans, creditPayments, orderCreditPayments, customers] = await Promise.all([
+            InstallmentPlan.find(tenantFilter).lean(),
+            CreditPayment.find({ ...tenantFilter, notes: { $ne: 'Adjusted from Order Desk overpayment.' } })
+                .sort({ timestamp: -1 })
+                .lean(),
+            Transaction.find({ ...tenantFilter, type: 'reduction', creditPaid: { $gt: 0 } })
+                .sort({ timestamp: -1 })
+                .lean(),
+            Customer.find(tenantFilter).select('fullName cnic amount').lean(),
+        ]);
+
+        const remainingByCustomer = new Map(
+            customers.map((customer) => [
+                buildCustomerKey(customer.fullName, customer.cnic || ''),
+                Number(customer.amount || 0),
+            ])
+        );
+
+        const installmentPayments = plans.flatMap((plan) => {
+            let paidSoFar = Number(plan.advancePayment || 0);
+            return [...(plan.schedule || [])]
+                .filter((item) => item.status === 'paid' && item.paidAt)
+                .sort((a, b) => new Date(a.paidAt!).getTime() - new Date(b.paidAt!).getTime())
+                .map((item) => {
+                    paidSoFar += Number(item.amount || 0);
+                    return {
+                        id: `${plan.planCode}-${item.installmentNumber}`,
+                        source: 'installment',
+                        timestamp: item.paidAt as Date,
+                        customerName: plan.customerName,
+                        customerCnic: plan.customerCnic,
+                        description: `Installment #${item.installmentNumber} - ${plan.productName}`,
+                        amount: Number(item.amount || 0),
+                        paidVia: item.paidVia || 'cash',
+                        notes: item.notes || '',
+                        remainingAmount: Math.max(Number(plan.totalAmount || 0) - paidSoFar, 0),
+                    };
+                });
+        });
+
+        const balancePayments = creditPayments.map((payment) => ({
+            id: String(payment._id),
+            source: 'balance',
+            timestamp: payment.timestamp,
+            customerName: payment.customerName,
+            customerCnic: payment.customerCnic || '',
+            description: 'Credit balance payment',
+            amount: Number(payment.receivedAmount ?? payment.amount ?? 0),
+            paidVia: payment.paidVia,
+            notes: payment.notes || '',
+            remainingAmount: Number(remainingByCustomer.get(buildCustomerKey(payment.customerName, payment.customerCnic || '')) || 0),
+        }));
+
+        const orderBalancePayments = orderCreditPayments.map((payment) => {
+            const customerName = payment.customerName || 'Unknown Customer';
+            const customerCnic = payment.customerCnic || '';
+            return {
+                id: `${payment._id}-credit-payment`,
+                source: 'balance',
+                timestamp: payment.timestamp || new Date(),
+                customerName,
+                customerCnic,
+                description: 'Paid toward previous credit during order',
+                amount: Number(payment.creditPaid || 0),
+                paidVia: payment.paidVia || 'cash',
+                notes: '',
+                remainingAmount: Number(payment.closingCredit || remainingByCustomer.get(buildCustomerKey(customerName, customerCnic)) || 0),
+            };
+        });
+
+        res.json([...installmentPayments, ...balancePayments, ...orderBalancePayments]
+            .sort((a, b) => new Date(b.timestamp as Date).getTime() - new Date(a.timestamp as Date).getTime()));
+    } catch (error: any) {
+        res.status(500).json({ message: error.message || 'Failed to load installment payment history' });
+    }
+};
+
 export const createInstallmentPlan = async (req: AuthRequest, res: Response) => {
     const session = await mongoose.startSession();
     session.startTransaction();
