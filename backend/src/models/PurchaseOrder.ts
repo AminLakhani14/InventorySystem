@@ -13,6 +13,8 @@ export interface IPurchaseOrder extends Document {
     vendorName: string;
     vehicleNumber: string;
     vehicleRent: number;
+    labourCost: number;
+    paymentStatus: 'paid' | 'unpaid';
     items: IPurchaseOrderItem[];
     totalProductPurchase: number;
     grandTotal: number;
@@ -38,6 +40,8 @@ const PurchaseOrderSchema = new Schema<IPurchaseOrder>(
         vendorName: { type: String, required: true, trim: true },
         vehicleNumber: { type: String, required: true, trim: true },
         vehicleRent: { type: Number, required: true, min: 0 },
+        labourCost: { type: Number, required: true, min: 0, default: 0 },
+        paymentStatus: { type: String, enum: ['paid', 'unpaid'], required: true, default: 'unpaid' },
         items: { type: [PurchaseOrderItemSchema], required: true, validate: [(items: IPurchaseOrderItem[]) => items.length > 0, 'At least one product is required'] },
         totalProductPurchase: { type: Number, required: true, min: 0 },
         grandTotal: { type: Number, required: true, min: 0 },

@@ -79,6 +79,27 @@ type CustomerRecord = {
   amountToReceive: number;
   lastPurchaseAt: string;
   days: DayRecord[];
+  creditHistory: CreditHistoryEntry[];
+};
+
+type CreditPayment = {
+  _id: string;
+  customerName: string;
+  customerCnic: string;
+  amount: number;
+  receivedAmount?: number;
+  paidVia: string;
+  notes?: string;
+  timestamp: string;
+};
+
+type CreditHistoryEntry = {
+  id: string;
+  timestamp: string;
+  description: string;
+  creditIncrease: number;
+  recoveredAmount: number;
+  remainingAmount: number;
 };
 
 const normalize = (value: string) => value.trim().toLowerCase();
@@ -145,6 +166,9 @@ const CustomerRecordsPage: React.FC = () => {
   const [creditCustomers, setCreditCustomers] = React.useState<
     CreditCustomer[]
   >([]);
+  const [creditPayments, setCreditPayments] = React.useState<CreditPayment[]>(
+    [],
+  );
   const [detailRecord, setDetailRecord] = React.useState<CustomerRecord | null>(
     null,
   );
@@ -175,10 +199,15 @@ const CustomerRecordsPage: React.FC = () => {
   React.useEffect(() => {
     const loadCreditCustomers = async () => {
       try {
-        const response = await api.get("/credits/customers");
-        setCreditCustomers(response.data || []);
+        const [customersResponse, paymentsResponse] = await Promise.all([
+          api.get("/credits/customers"),
+          api.get<CreditPayment[]>("/credits/payments"),
+        ]);
+        setCreditCustomers(customersResponse.data || []);
+        setCreditPayments(paymentsResponse.data || []);
       } catch {
         setCreditCustomers([]);
+        setCreditPayments([]);
       }
     };
 
@@ -288,6 +317,73 @@ const CustomerRecordsPage: React.FC = () => {
         );
         const creditOutstanding = creditOutstandingMap[key];
         const amountToReceive = creditOutstanding ?? transactionDueAmount;
+        const creditEvents = [
+          ...group.transactions
+            .filter((tx) => Number(tx.dueAmount || 0) > 0)
+            .map((tx) => ({
+              id: `${tx.id}-credit`,
+              timestamp: tx.timestamp,
+              description: `Credit increased from ${tx.productName}`,
+              creditIncrease: Number(tx.dueAmount || 0),
+              recoveredAmount: 0,
+            })),
+          ...group.transactions
+            .filter((tx) => Number(tx.creditPaid || 0) > 0)
+            .map((tx) => ({
+              id: `${tx.id}-order-payment`,
+              timestamp: tx.timestamp,
+              description: "Paid toward previous credit during order",
+              creditIncrease: 0,
+              recoveredAmount: Number(tx.creditPaid || 0),
+            })),
+          ...creditPayments
+            .filter(
+              (payment) =>
+                customerKey(payment.customerName, payment.customerCnic || "") ===
+                  key &&
+                payment.notes !== "Adjusted from Order Desk overpayment.",
+            )
+            .map((payment) => ({
+              id: payment._id,
+              timestamp: payment.timestamp,
+              description: payment.notes || "Credit balance payment",
+              creditIncrease: 0,
+              recoveredAmount: Number(
+                payment.receivedAmount ?? payment.amount ?? 0,
+              ),
+            })),
+        ].sort((a, b) => {
+          const timeDifference =
+            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+          return timeDifference || b.creditIncrease - a.creditIncrease;
+        });
+        const openingBalance = Math.max(
+          0,
+          amountToReceive -
+            creditEvents.reduce(
+              (sum, event) => sum + event.creditIncrease - event.recoveredAmount,
+              0,
+            ),
+        );
+        let runningBalance = openingBalance;
+        const creditHistory: CreditHistoryEntry[] = [];
+        if (openingBalance > 0) {
+          creditHistory.push({
+            id: `${key}-opening-balance`,
+            timestamp: "",
+            description: "Opening credit balance",
+            creditIncrease: openingBalance,
+            recoveredAmount: 0,
+            remainingAmount: openingBalance,
+          });
+        }
+        creditEvents.forEach((event) => {
+          runningBalance = Math.max(
+            0,
+            runningBalance + event.creditIncrease - event.recoveredAmount,
+          );
+          creditHistory.push({ ...event, remainingAmount: runningBalance });
+        });
 
         return {
           key,
@@ -302,6 +398,7 @@ const CustomerRecordsPage: React.FC = () => {
           amountToReceive,
           lastPurchaseAt: group.transactions[0]?.timestamp || "",
           days,
+          creditHistory: creditHistory.reverse(),
         };
       })
       .sort(
@@ -309,7 +406,7 @@ const CustomerRecordsPage: React.FC = () => {
           new Date(b.lastPurchaseAt).getTime() -
           new Date(a.lastPurchaseAt).getTime(),
       );
-  }, [transactions, creditOutstandingMap, fromDate, toDate]);
+  }, [transactions, creditOutstandingMap, creditPayments, fromDate, toDate]);
 
   React.useEffect(() => {
     if (!loading && transactions.length === 0) {
@@ -903,6 +1000,71 @@ const CustomerRecordsPage: React.FC = () => {
                       </Box>
                     </Grid>
                   </Grid>
+
+                  <Box
+                    sx={{
+                      border: "1px solid",
+                      borderColor: "divider",
+                      borderRadius: "8px",
+                      overflow: "hidden",
+                    }}
+                  >
+                    <Box
+                      sx={{
+                        p: 2,
+                        bgcolor: alpha(theme.palette.success.main, 0.08),
+                        borderBottom: "1px solid",
+                        borderColor: "divider",
+                      }}
+                    >
+                      <Typography fontWeight={900}>
+                        Credit & Recovery History
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Every credit increase and recovered amount, with the balance remaining after each entry.
+                      </Typography>
+                    </Box>
+                    {detailRecord.creditHistory.length ? (
+                      <TableContainer sx={{ overflowX: "auto" }}>
+                        <Table size="small" sx={{ minWidth: 760 }}>
+                          <TableHead>
+                            <TableRow>
+                              <TableCell sx={{ fontWeight: 800 }}>DATE & TIME</TableCell>
+                              <TableCell sx={{ fontWeight: 800 }}>DETAIL</TableCell>
+                              <TableCell sx={{ fontWeight: 800 }}>CREDIT INCREASE</TableCell>
+                              <TableCell sx={{ fontWeight: 800 }}>RECOVERED</TableCell>
+                              <TableCell sx={{ fontWeight: 800 }}>REMAINING</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {detailRecord.creditHistory.map((entry) => (
+                              <TableRow key={entry.id} hover>
+                                <TableCell>
+                                  {entry.timestamp
+                                    ? new Date(entry.timestamp).toLocaleString()
+                                    : "Before recorded activity"}
+                                </TableCell>
+                                <TableCell><Typography variant="body2" fontWeight={800}>{entry.description}</Typography></TableCell>
+                                <TableCell sx={{ color: entry.creditIncrease > 0 ? "warning.main" : "text.secondary", fontWeight: 800 }}>
+                                  {entry.creditIncrease > 0 ? formatCurrency(entry.creditIncrease, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : "-"}
+                                </TableCell>
+                                <TableCell sx={{ color: entry.recoveredAmount > 0 ? "success.main" : "text.secondary", fontWeight: 800 }}>
+                                  {entry.recoveredAmount > 0 ? formatCurrency(entry.recoveredAmount, { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : "-"}
+                                </TableCell>
+                                <TableCell sx={{ color: entry.remainingAmount > 0 ? "warning.main" : "success.main", fontWeight: 800 }}>
+                                  {formatCurrency(entry.remainingAmount, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                    ) : (
+                      <Typography color="text.secondary" sx={{ p: 3 }}>
+                        No credit increase or recovery entries have been recorded for this customer.
+                      </Typography>
+                    )}
+                  </Box>
 
                   {detailRecord.days.map((day) => (
                     <Box

@@ -186,6 +186,8 @@ export const purchaseOrderSchema = Joi.object({
     vendorName: Joi.string().trim().min(2).max(120).required(),
     vehicleNumber: Joi.string().trim().min(2).max(60).required(),
     vehicleRent: Joi.number().min(0).required(),
+    labourCost: Joi.number().min(0).required(),
+    paymentStatus: Joi.string().valid('paid', 'unpaid').required(),
     items: Joi.array().min(1).items(
         Joi.object({
             productId: Joi.string().required(),
