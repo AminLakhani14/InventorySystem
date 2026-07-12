@@ -4,6 +4,7 @@ import InstallmentPlan from '../models/InstallmentPlan';
 import Product from '../models/Product';
 import Transaction from '../models/Transaction';
 import Customer from '../models/Customer';
+import CreditPayment from '../models/CreditPayment';
 import type { AuthRequest } from '../middleware/auth';
 import { normalizeRole } from '../utils/accessControl';
 import { buildTenantFilter, getTenantObjectId } from '../utils/tenancy';
@@ -58,12 +59,51 @@ const refreshInstallmentStatus = (plan: any) => {
 export const getInstallmentPlans = async (req: AuthRequest, res: Response) => {
     try {
         const tenantFilter = buildTenantFilter(req.user!);
-        const [plans, closingBalanceCustomers] = await Promise.all([
+        const [plans, closingBalanceCustomers, creditPayments, orderCreditPayments] = await Promise.all([
             InstallmentPlan.find(tenantFilter).sort({ createdAt: -1 }).lean(),
             Customer.find({ ...tenantFilter, amount: { $gt: 0 } })
                 .select('fullName cnic phoneNumber address amount updatedAt')
                 .lean(),
+            CreditPayment.aggregate([
+                { $match: tenantFilter },
+                {
+                    $group: {
+                        _id: { customerName: '$customerName', customerCnic: '$customerCnic' },
+                        totalPaid: {
+                            $sum: {
+                                $cond: [
+                                    { $eq: ['$notes', 'Adjusted from Order Desk overpayment.'] },
+                                    0,
+                                    { $ifNull: ['$receivedAmount', '$amount'] },
+                                ]
+                            }
+                        },
+                    }
+                },
+            ]),
+            Transaction.aggregate([
+                {
+                    $match: {
+                        ...tenantFilter,
+                        type: 'reduction',
+                        creditPaid: { $gt: 0 },
+                        customerName: { $nin: ['', null] },
+                    }
+                },
+                {
+                    $group: {
+                        _id: { customerName: '$customerName', customerCnic: '$customerCnic' },
+                        totalPaid: { $sum: '$creditPaid' },
+                    }
+                },
+            ]),
         ]);
+
+        const paidByCustomer = new Map<string, number>();
+        [...creditPayments, ...orderCreditPayments].forEach((entry) => {
+            const key = buildCustomerKey(entry._id.customerName, entry._id.customerCnic || '');
+            paidByCustomer.set(key, round2((paidByCustomer.get(key) || 0) + Number(entry.totalPaid || 0)));
+        });
 
         const activeInstallmentCustomerKeys = new Set(
             plans
@@ -73,6 +113,7 @@ export const getInstallmentPlans = async (req: AuthRequest, res: Response) => {
 
         const closingBalancePlans = closingBalanceCustomers.map((customer) => {
             const balance = round2(Number(customer.amount || 0));
+            const paidAmount = paidByCustomer.get(buildCustomerKey(customer.fullName, customer.cnic || '')) || 0;
             const hasActiveInstallment = activeInstallmentCustomerKeys.has(
                 buildCustomerKey(customer.fullName, customer.cnic || '')
             );
@@ -88,12 +129,12 @@ export const getInstallmentPlans = async (req: AuthRequest, res: Response) => {
                 witnesses: [],
                 saleDate: customer.updatedAt || new Date(),
                 installmentMonths: 0,
-                unitPrice: balance,
+                unitPrice: round2(balance + paidAmount),
                 advancePayment: 0,
-                financedAmount: balance,
+                financedAmount: round2(balance + paidAmount),
                 monthlyInstallmentAmount: balance,
-                totalAmount: balance,
-                paidAmount: 0,
+                totalAmount: round2(balance + paidAmount),
+                paidAmount,
                 remainingAmount: balance,
                 status: 'active',
                 schedule: [],

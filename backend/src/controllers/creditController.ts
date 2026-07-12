@@ -25,7 +25,7 @@ interface OutstandingCreditCustomer {
 
 const getOutstandingCreditCustomers = async (tenant: TenantContext): Promise<OutstandingCreditCustomer[]> => {
     const tenantFilter = buildTenantFilter(tenant);
-    const [creditSales, payments, closingBalanceCustomers] = await Promise.all([
+    const [creditSales, payments, orderCreditPayments, closingBalanceCustomers] = await Promise.all([
         Transaction.aggregate([
             {
                 $match: {
@@ -60,9 +60,38 @@ const getOutstandingCreditCustomers = async (tenant: TenantContext): Promise<Out
                         customerName: '$customerName',
                         customerCnic: '$customerCnic',
                     },
-                    totalRecovered: { $sum: '$amount' },
+                    totalRecovered: {
+                        $sum: {
+                            $cond: [
+                                { $eq: ['$notes', 'Adjusted from Order Desk overpayment.'] },
+                                0,
+                                { $ifNull: ['$receivedAmount', '$amount'] },
+                            ]
+                        }
+                    },
+                    totalAllocatedToSales: { $sum: '$amount' },
                     lastPaymentAt: { $max: '$timestamp' },
                     latestNextDueDate: { $first: '$nextDueDate' },
+                }
+            }
+        ]),
+        Transaction.aggregate([
+            {
+                $match: {
+                    ...tenantFilter,
+                    type: 'reduction',
+                    creditPaid: { $gt: 0 },
+                    customerName: { $nin: ['', null] },
+                }
+            },
+            {
+                $group: {
+                    _id: {
+                        customerName: '$customerName',
+                        customerCnic: '$customerCnic',
+                    },
+                    totalRecovered: { $sum: '$creditPaid' },
+                    lastPaymentAt: { $max: '$timestamp' },
                 }
             }
         ]),
@@ -87,14 +116,26 @@ const getOutstandingCreditCustomers = async (tenant: TenantContext): Promise<Out
         ])
     );
 
+    const orderCreditPaymentMap = new Map(
+        orderCreditPayments.map((entry) => [
+            buildCustomerKey(entry._id.customerName, entry._id.customerCnic || ''),
+            entry,
+        ])
+    );
+
     const combined = new Map<string, OutstandingCreditCustomer>();
 
     creditSales.forEach((sale) => {
         const key = buildCustomerKey(sale._id.customerName, sale._id.customerCnic);
         const payment = paymentMap.get(key);
-        const totalRecovered = Number(payment?.totalRecovered || 0);
+        const orderPayment = orderCreditPaymentMap.get(key);
+        const totalRecovered = Number(payment?.totalRecovered || 0) + Number(orderPayment?.totalRecovered || 0);
         const closingBalance = Number(closingBalanceMap.get(key)?.amount || 0);
-        const totalCreditIssued = Number(sale.totalCreditIssued || 0) + closingBalance;
+        const outstandingAmount = Math.max(
+            Number(sale.totalCreditIssued || 0) + closingBalance - Number(payment?.totalAllocatedToSales || 0),
+            0
+        );
+        const totalCreditIssued = outstandingAmount + totalRecovered;
 
         combined.set(key, {
             customerName: sale._id.customerName,
@@ -105,9 +146,9 @@ const getOutstandingCreditCustomers = async (tenant: TenantContext): Promise<Out
             totalCreditIssued,
             totalRecovered,
             closingBalance,
-            outstandingAmount: Math.max(totalCreditIssued - totalRecovered, 0),
+            outstandingAmount,
             lastSaleAt: sale.lastSaleAt,
-            lastPaymentAt: payment?.lastPaymentAt || null,
+            lastPaymentAt: payment?.lastPaymentAt || orderPayment?.lastPaymentAt || null,
             nextDueDate: payment?.latestNextDueDate || null,
         });
     });
@@ -117,8 +158,10 @@ const getOutstandingCreditCustomers = async (tenant: TenantContext): Promise<Out
         if (combined.has(key)) return;
 
         const payment = paymentMap.get(key);
-        const totalRecovered = Number(payment?.totalRecovered || 0);
+        const orderPayment = orderCreditPaymentMap.get(key);
+        const totalRecovered = Number(payment?.totalRecovered || 0) + Number(orderPayment?.totalRecovered || 0);
         const closingBalance = Number(customer.amount || 0);
+        const outstandingAmount = closingBalance;
 
         combined.set(key, {
             customerName: customer.fullName,
@@ -126,12 +169,12 @@ const getOutstandingCreditCustomers = async (tenant: TenantContext): Promise<Out
             totalInvoices: 0,
             totalSoldAmount: 0,
             totalPaidAtSale: 0,
-            totalCreditIssued: closingBalance,
+            totalCreditIssued: outstandingAmount + totalRecovered,
             totalRecovered,
             closingBalance,
-            outstandingAmount: Math.max(closingBalance - totalRecovered, 0),
+            outstandingAmount,
             lastSaleAt: null,
-            lastPaymentAt: payment?.lastPaymentAt || null,
+            lastPaymentAt: payment?.lastPaymentAt || orderPayment?.lastPaymentAt || null,
             nextDueDate: payment?.latestNextDueDate || null,
         });
     });

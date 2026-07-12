@@ -108,15 +108,20 @@ const getPaymentLabel = (method?: string) => {
 const ANONYMOUS_CUSTOMER_NAME = "Anonymous";
 
 const resolveReceivedAmount = (tx: Transaction) => {
+  const previousCreditPayment = Number(tx.creditPaid || 0);
+
   if (tx.paymentMethod === "credit" || tx.paymentMethod === "installment") {
-    return Number(tx.paidNow || 0);
+    return Number(tx.paidNow || 0) + previousCreditPayment;
   }
-  return Number(tx.paidNow || tx.totalPrice || 0);
+  return Number(tx.paidNow || tx.totalPrice || 0) + previousCreditPayment;
 };
 
 const resolveDueAmount = (tx: Transaction) => {
   if (tx.dueAmount != null) return Number(tx.dueAmount || 0);
-  return Math.max(Number(tx.totalPrice || 0) - resolveReceivedAmount(tx), 0);
+  return Math.max(
+    Number(tx.totalPrice || 0) - Number(tx.paidNow || 0),
+    0,
+  );
 };
 
 const buildItemSummary = (lines: PurchaseLine[]) => {
@@ -277,6 +282,10 @@ const CustomerRecordsPage: React.FC = () => {
           (sum, tx) => sum + resolveDueAmount(tx),
           0,
         );
+        const receivedAmount = group.transactions.reduce(
+          (sum, tx) => sum + resolveReceivedAmount(tx),
+          0,
+        );
         const creditOutstanding = creditOutstandingMap[key];
         const amountToReceive = creditOutstanding ?? transactionDueAmount;
 
@@ -289,7 +298,7 @@ const CustomerRecordsPage: React.FC = () => {
             0,
           ),
           totalAmount,
-          receivedAmount: Math.max(totalAmount - amountToReceive, 0),
+          receivedAmount,
           amountToReceive,
           lastPurchaseAt: group.transactions[0]?.timestamp || "",
           days,

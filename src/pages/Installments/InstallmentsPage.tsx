@@ -201,7 +201,7 @@ const InstallmentsPage: React.FC = () => {
                     <Card sx={{ borderRadius: 4, overflow: 'hidden' }}>
                         <CardContent sx={{ p: 0 }}>
                             <TableContainer sx={{ overflowX: 'auto' }}>
-                                <Table sx={{ minWidth: 1180 }}>
+                                <Table sx={{ minWidth: 1260 }}>
                                     <TableHead>
                                         <TableRow>
                                             <TableCell sx={{ fontWeight: 700 }}>PLAN</TableCell>
@@ -210,6 +210,7 @@ const InstallmentsPage: React.FC = () => {
                                             <TableCell sx={{ fontWeight: 700 }}>PRODUCT</TableCell>
                                             <TableCell sx={{ fontWeight: 700 }}>TERM</TableCell>
                                             <TableCell sx={{ fontWeight: 700 }}>TOTAL</TableCell>
+                                            <TableCell sx={{ fontWeight: 700 }}>PAID</TableCell>
                                             <TableCell sx={{ fontWeight: 700 }}>REMAINING</TableCell>
                                             <TableCell sx={{ fontWeight: 700 }}>NEXT DUE</TableCell>
                                             <TableCell align="right" sx={{ fontWeight: 700 }}>ACTION</TableCell>
@@ -218,7 +219,7 @@ const InstallmentsPage: React.FC = () => {
                                     <TableBody>
                                         {activePlans.length === 0 ? (
                                             <TableRow>
-                                                <TableCell colSpan={9} align="center" sx={{ py: 8 }}>
+                                                <TableCell colSpan={10} align="center" sx={{ py: 8 }}>
                                                     <Typography color="text.secondary">
                                                         {loading ? 'Loading installment plans...' : 'No active installment plans right now.'}
                                                     </Typography>
@@ -285,6 +286,9 @@ const InstallmentsPage: React.FC = () => {
                                                             )}
                                                         </TableCell>
                                                         <TableCell>{formatCurrency(plan.totalAmount, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</TableCell>
+                                                        <TableCell sx={{ color: 'success.main', fontWeight: 800 }}>
+                                                            {formatCurrency(plan.paidAmount, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                                        </TableCell>
                                                         <TableCell sx={{ color: 'warning.main', fontWeight: 800 }}>
                                                             {formatCurrency(plan.remainingAmount, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                                                         </TableCell>
