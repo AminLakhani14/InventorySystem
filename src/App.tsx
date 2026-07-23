@@ -41,6 +41,7 @@ const StickyNotes = React.lazy(() => import('./pages/Notes/StickyNotes'));
 const TeamManagementPage = React.lazy(() => import('./pages/Admin/TeamManagementPage'));
 const SignupRequestsPage = React.lazy(() => import('./pages/Admin/SignupRequestsPage'));
 const PurchaseOrdersPage = React.lazy(() => import('./pages/Inventory/PurchaseOrdersPage'));
+const VendorsPage = React.lazy(() => import('./pages/Inventory/VendorsPage'));
 const AppContent: React.FC = () => {
   const dispatch = useDispatch<AppDispatch>();
   const { mode } = useSelector((state: RootState) => state.theme);
@@ -82,6 +83,7 @@ const AppContent: React.FC = () => {
               <Route path="inventory/add" element={<AddProduct />} />
               <Route path="inventory/units" element={<ProductUnitsPage />} />
               <Route path="inventory/purchase-orders" element={<ProtectedRoute allowedRoles={['super_admin', 'admin']}><PurchaseOrdersPage /></ProtectedRoute>} />
+              <Route path="inventory/vendors" element={<ProtectedRoute allowedRoles={['super_admin', 'admin']}><VendorsPage /></ProtectedRoute>} />
               <Route path="inventory/requests" element={<Navigate to="/inventory/purchase-orders" replace />} />
               <Route path="inventory/reduce" element={
                 <ProtectedRoute allowedRoles={['super_admin', 'admin']}>
