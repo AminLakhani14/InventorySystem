@@ -35,8 +35,6 @@ interface PurchaseOrderItem {
     productId: string;
     productName: string;
     quantity: number;
-    unitPurchasePrice: number;
-    totalPurchase: number;
 }
 
 interface PurchaseOrder {
@@ -48,7 +46,6 @@ interface PurchaseOrder {
     labourCost: number;
     paymentStatus: 'paid' | 'unpaid';
     items: PurchaseOrderItem[];
-    totalProductPurchase: number;
     grandTotal: number;
     receivedByName: string;
     createdAt: string;
@@ -57,7 +54,6 @@ interface PurchaseOrder {
 interface DraftItem {
     product: Product | null;
     quantity: string;
-    unitPurchasePrice: string;
 }
 
 interface StoredPurchaseOrderDraft {
@@ -66,11 +62,11 @@ interface StoredPurchaseOrderDraft {
     vehicleRent: string;
     labourCost: string;
     paymentStatus: 'paid' | 'unpaid';
-    items: Array<{ productId: string | null; quantity: string; unitPurchasePrice: string }>;
+    items: Array<{ productId: string | null; quantity: string }>;
     editingId: string | null;
 }
 
-const emptyItem = (): DraftItem => ({ product: null, quantity: '', unitPurchasePrice: '' });
+const emptyItem = (): DraftItem => ({ product: null, quantity: '' });
 const toNumber = (value: string) => Number(value) || 0;
 
 const readDraft = (key: string): StoredPurchaseOrderDraft | null => {
@@ -130,7 +126,6 @@ const PurchaseOrdersPage: React.FC = () => {
             setItems(storedDraft.items.map((item) => ({
                 product: products.find((product) => product.id === item.productId) || null,
                 quantity: item.quantity,
-                unitPurchasePrice: item.unitPurchasePrice,
             })));
         }
         draftReady.current = true;
@@ -148,7 +143,6 @@ const PurchaseOrdersPage: React.FC = () => {
             items: items.map((item) => ({
                 productId: item.product?.id || null,
                 quantity: item.quantity,
-                unitPurchasePrice: item.unitPurchasePrice,
             })),
             editingId,
         };
@@ -170,8 +164,7 @@ const PurchaseOrdersPage: React.FC = () => {
         setItems((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...changes } : item));
     };
 
-    const productTotal = items.reduce((total, item) => total + toNumber(item.quantity) * toNumber(item.unitPurchasePrice), 0);
-    const grandTotal = productTotal + toNumber(vehicleRent) + toNumber(labourCost);
+    const grandTotal = toNumber(vehicleRent) + toNumber(labourCost);
     const filteredOrders = React.useMemo(() => {
         const query = searchQuery.trim().toLocaleLowerCase();
         if (!query) return orders;
@@ -190,8 +183,8 @@ const PurchaseOrdersPage: React.FC = () => {
             setError('Vendor name and Gadi Number are required.');
             return;
         }
-        if (items.some((item) => !item.product || toNumber(item.quantity) <= 0 || toNumber(item.unitPurchasePrice) < 0)) {
-            setError('Select an inventory product and enter a valid quantity and purchase price for every row.');
+        if (items.some((item) => !item.product || toNumber(item.quantity) <= 0)) {
+            setError('Select an inventory product and enter a valid quantity for every row.');
             return;
         }
 
@@ -203,7 +196,7 @@ const PurchaseOrdersPage: React.FC = () => {
             vehicleRent: toNumber(vehicleRent),
             labourCost: toNumber(labourCost),
             paymentStatus,
-            items: items.map((item) => ({ productId: item.product!.id, quantity: toNumber(item.quantity), unitPurchasePrice: toNumber(item.unitPurchasePrice) })),
+            items: items.map((item) => ({ productId: item.product!.id, quantity: toNumber(item.quantity) })),
         };
         try {
             if (editingId) {
@@ -228,7 +221,7 @@ const PurchaseOrdersPage: React.FC = () => {
         setVehicleRent(String(order.vehicleRent));
         setLabourCost(String(order.labourCost || 0));
         setPaymentStatus(order.paymentStatus || 'unpaid');
-        setItems(order.items.map((item) => ({ product: products.find((product) => product.id === item.productId) || null, quantity: String(item.quantity), unitPurchasePrice: String(item.unitPurchasePrice) })));
+        setItems(order.items.map((item) => ({ product: products.find((product) => product.id === item.productId) || null, quantity: String(item.quantity) })));
         setEditingId(order._id);
         setError('');
         window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -275,22 +268,18 @@ const PurchaseOrdersPage: React.FC = () => {
 
                     <Divider sx={{ my: 3 }} />
                     <Stack spacing={2}>
-                        {items.map((item, index) => {
-                            const lineTotal = toNumber(item.quantity) * toNumber(item.unitPurchasePrice);
-                            return <Grid container spacing={2} key={index} alignItems="center">
-                                <Grid size={{ xs: 12, md: 4 }}><Autocomplete options={products} value={item.product} onChange={(_, product) => updateItem(index, { product })} getOptionLabel={(product) => `${product.name} (${product.sku})`} isOptionEqualToValue={(option, value) => option.id === value.id} renderInput={(params) => <TextField {...params} required label="Product Name" />} /></Grid>
-                                <Grid size={{ xs: 6, md: 2 }}><TextField fullWidth required label="Qty" type="number" slotProps={{ htmlInput: { min: 0.0001, step: 'any' } }} value={item.quantity} onChange={(event) => updateItem(index, { quantity: event.target.value })} /></Grid>
-                                <Grid size={{ xs: 6, md: 2 }}><TextField fullWidth required label="Purchase Price" type="number" slotProps={{ htmlInput: { min: 0, step: 'any' } }} value={item.unitPurchasePrice} onChange={(event) => updateItem(index, { unitPurchasePrice: event.target.value })} /></Grid>
-                                <Grid size={{ xs: 10, md: 3 }}><Typography variant="caption" color="text.secondary">Total Purchase</Typography><Typography fontWeight={800}>{formatCurrency(lineTotal)}</Typography></Grid>
+                        {items.map((item, index) => (
+                            <Grid container spacing={2} key={index} alignItems="center">
+                                <Grid size={{ xs: 12, md: 7 }}><Autocomplete options={products} value={item.product} onChange={(_, product) => updateItem(index, { product })} getOptionLabel={(product) => `${product.name} (${product.sku})`} isOptionEqualToValue={(option, value) => option.id === value.id} renderInput={(params) => <TextField {...params} required label="Product Name" />} /></Grid>
+                                <Grid size={{ xs: 10, md: 4 }}><TextField fullWidth required label="Qty" type="number" slotProps={{ htmlInput: { min: 0.0001, step: 'any' } }} value={item.quantity} onChange={(event) => updateItem(index, { quantity: event.target.value })} /></Grid>
                                 <Grid size={{ xs: 2, md: 1 }} sx={{ textAlign: 'right' }}><IconButton color="error" aria-label="Remove product" onClick={() => setItems((current) => current.length === 1 ? current : current.filter((_, itemIndex) => itemIndex !== index))} disabled={items.length === 1}><Trash2 size={18} /></IconButton></Grid>
-                            </Grid>;
-                        })}
+                            </Grid>
+                        ))}
                     </Stack>
 
                     <Button sx={{ mt: 2 }} startIcon={<Plus size={18} />} onClick={() => setItems((current) => [...current, emptyItem()])}>Add Another Product</Button>
                     <Box sx={{ mt: 3, ml: 'auto', maxWidth: 360, p: 2, borderRadius: 3, bgcolor: 'action.hover' }}>
-                        <Stack direction="row" justifyContent="space-between"><Typography color="text.secondary">Products Total</Typography><Typography fontWeight={700}>{formatCurrency(productTotal)}</Typography></Stack>
-                        <Stack direction="row" justifyContent="space-between" sx={{ mt: 1 }}><Typography color="text.secondary">Gadi Rent</Typography><Typography fontWeight={700}>{formatCurrency(toNumber(vehicleRent))}</Typography></Stack>
+                        <Stack direction="row" justifyContent="space-between"><Typography color="text.secondary">Gadi Rent</Typography><Typography fontWeight={700}>{formatCurrency(toNumber(vehicleRent))}</Typography></Stack>
                         <Stack direction="row" justifyContent="space-between" sx={{ mt: 1 }}><Typography color="text.secondary">Labour Cost</Typography><Typography fontWeight={700}>{formatCurrency(toNumber(labourCost))}</Typography></Stack>
                         <Divider sx={{ my: 1.25 }} />
                         <Stack direction="row" justifyContent="space-between"><Typography fontWeight={800}>Grand Total</Typography><Typography fontWeight={900}>{formatCurrency(grandTotal)}</Typography></Stack>
@@ -315,19 +304,18 @@ const PurchaseOrdersPage: React.FC = () => {
             </Stack>
             {loading ? <Box sx={{ minHeight: 160, display: 'grid', placeItems: 'center' }}><CircularProgress /></Box> : !orders.length ? <Card sx={{ borderRadius: 3 }}><CardContent sx={{ textAlign: 'center', py: 5 }}><ClipboardCheck size={36} style={{ opacity: 0.45 }} /><Typography fontWeight={800} sx={{ mt: 1 }}>No purchase orders yet</Typography><Typography variant="body2" color="text.secondary">Your vendor deliveries will appear here.</Typography></CardContent></Card> : (
                 <TableContainer component={Paper} sx={{ borderRadius: 3 }}>
-                    <Table size="small" sx={{ minWidth: 1100 }}>
-                        <TableHead><TableRow sx={{ bgcolor: 'action.hover' }}><TableCell>Order / Vendor</TableCell><TableCell>Products</TableCell><TableCell>Gadi Rent</TableCell><TableCell>Labour</TableCell><TableCell>Purchase</TableCell><TableCell>Total Amount</TableCell><TableCell>Payment</TableCell><TableCell align="right">Action</TableCell></TableRow></TableHead>
+                    <Table size="small" sx={{ minWidth: 1000 }}>
+                        <TableHead><TableRow sx={{ bgcolor: 'action.hover' }}><TableCell>Order / Vendor</TableCell><TableCell>Products</TableCell><TableCell>Gadi Rent</TableCell><TableCell>Labour</TableCell><TableCell>Total Amount</TableCell><TableCell>Payment</TableCell><TableCell align="right">Action</TableCell></TableRow></TableHead>
                         <TableBody>{filteredOrders.map((order) => <TableRow key={order._id} hover>
                             <TableCell><Typography fontWeight={800}>{order.vendorName}</Typography><Typography variant="caption" color="text.secondary">{order.orderNumber} · Gadi: {order.vehicleNumber}</Typography></TableCell>
                             <TableCell><Typography variant="body2">{order.items.map((item) => `${item.productName} × ${item.quantity}`).join(', ')}</Typography><Typography variant="caption" color="text.secondary">{new Date(order.createdAt).toLocaleString()}</Typography></TableCell>
                             <TableCell>{formatCurrency(order.vehicleRent)}</TableCell>
                             <TableCell>{formatCurrency(order.labourCost || 0)}</TableCell>
-                            <TableCell>{formatCurrency(order.totalProductPurchase)}</TableCell>
                             <TableCell><Typography fontWeight={800}>{formatCurrency(order.grandTotal)}</Typography></TableCell>
                             <TableCell><Chip size="small" label={order.paymentStatus === 'paid' ? 'Paid' : 'Unpaid'} color={order.paymentStatus === 'paid' ? 'success' : 'warning'} /></TableCell>
                             <TableCell align="right"><IconButton aria-label="Edit purchase order" color="primary" onClick={() => startEdit(order)}><Pencil size={18} /></IconButton><IconButton aria-label="Delete purchase order" color="error" onClick={() => handleDelete(order)}><Trash2 size={18} /></IconButton></TableCell>
                         </TableRow>)}
-                        {!filteredOrders.length && <TableRow><TableCell colSpan={8} align="center" sx={{ py: 5 }}><Typography color="text.secondary">No purchase orders match "{searchQuery.trim()}".</Typography></TableCell></TableRow>}
+                        {!filteredOrders.length && <TableRow><TableCell colSpan={7} align="center" sx={{ py: 5 }}><Typography color="text.secondary">No purchase orders match "{searchQuery.trim()}".</Typography></TableCell></TableRow>}
                         </TableBody>
                     </Table>
                 </TableContainer>

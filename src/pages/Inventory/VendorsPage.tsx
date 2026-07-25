@@ -25,7 +25,6 @@ import {
 } from '@mui/material';
 import {
     Eye,
-    PackageCheck,
     ReceiptText,
     Search,
     Store,
@@ -40,8 +39,6 @@ interface PurchaseOrderItem {
     productId: string;
     productName: string;
     quantity: number;
-    unitPurchasePrice: number;
-    totalPurchase: number;
 }
 
 interface PurchaseOrder {
@@ -54,7 +51,6 @@ interface PurchaseOrder {
     labourCost: number;
     paymentStatus: 'paid' | 'unpaid';
     items: PurchaseOrderItem[];
-    totalProductPurchase: number;
     grandTotal: number;
     receivedByName: string;
     createdAt: string;
@@ -64,7 +60,6 @@ interface ProductSummary {
     key: string;
     name: string;
     quantity: number;
-    totalPurchase: number;
 }
 
 interface VendorSummary {
@@ -73,7 +68,6 @@ interface VendorSummary {
     name: string;
     orders: PurchaseOrder[];
     products: ProductSummary[];
-    totalProductPurchase: number;
     totalVehicleRent: number;
     totalLabourCost: number;
     grandTotal: number;
@@ -102,7 +96,6 @@ const buildVendorSummaries = (orders: PurchaseOrder[]): VendorSummary[] => {
                 name: order.vendorName.trim().replace(/\s+/g, ' '),
                 orders: [],
                 products: [],
-                totalProductPurchase: 0,
                 totalVehicleRent: 0,
                 totalLabourCost: 0,
                 grandTotal: 0,
@@ -112,7 +105,6 @@ const buildVendorSummaries = (orders: PurchaseOrder[]): VendorSummary[] => {
         }
 
         vendor.orders.push(order);
-        vendor.totalProductPurchase += Number(order.totalProductPurchase) || 0;
         vendor.totalVehicleRent += Number(order.vehicleRent) || 0;
         vendor.totalLabourCost += Number(order.labourCost) || 0;
         vendor.grandTotal += Number(order.grandTotal) || 0;
@@ -128,13 +120,11 @@ const buildVendorSummaries = (orders: PurchaseOrder[]): VendorSummary[] => {
             const product = vendor!.products.find((entry) => entry.key === productKey);
             if (product) {
                 product.quantity += Number(item.quantity) || 0;
-                product.totalPurchase += Number(item.totalPurchase) || 0;
             } else {
                 vendor!.products.push({
                     key: productKey,
                     name: item.productName,
                     quantity: Number(item.quantity) || 0,
-                    totalPurchase: Number(item.totalPurchase) || 0,
                 });
             }
         });
@@ -144,7 +134,7 @@ const buildVendorSummaries = (orders: PurchaseOrder[]): VendorSummary[] => {
         .map((vendor) => ({
             ...vendor,
             orders: [...vendor.orders].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
-            products: [...vendor.products].sort((a, b) => b.totalPurchase - a.totalPurchase),
+            products: [...vendor.products].sort((a, b) => b.quantity - a.quantity),
         }))
         .sort((a, b) => new Date(b.lastPurchaseAt).getTime() - new Date(a.lastPurchaseAt).getTime());
 };
@@ -200,7 +190,6 @@ const VendorsPage: React.FC = () => {
     }, [searchQuery, vendors]);
 
     const totals = React.useMemo(() => ({
-        productPurchase: vendors.reduce((sum, vendor) => sum + vendor.totalProductPurchase, 0),
         grandTotal: vendors.reduce((sum, vendor) => sum + vendor.grandTotal, 0),
         orders: vendors.reduce((sum, vendor) => sum + vendor.orders.length, 0),
     }), [vendors]);
@@ -234,14 +223,6 @@ const VendorsPage: React.FC = () => {
                         <Stack direction="row" alignItems="center" spacing={1.5}>
                             <ReceiptText color="#0ea5a5" />
                             <Box><Typography variant="body2" color="text.secondary">Purchase Orders</Typography><Typography variant="h5" fontWeight={900}>{totals.orders}</Typography></Box>
-                        </Stack>
-                    </CardContent>
-                </Card>
-                <Card sx={{ flex: 1, borderRadius: 3 }}>
-                    <CardContent>
-                        <Stack direction="row" alignItems="center" spacing={1.5}>
-                            <PackageCheck color="#0ea5a5" />
-                            <Box><Typography variant="body2" color="text.secondary">Vegetable Buying</Typography><Typography variant="h5" fontWeight={900}>{formatCurrency(totals.productPurchase)}</Typography></Box>
                         </Stack>
                     </CardContent>
                 </Card>
@@ -288,7 +269,6 @@ const VendorsPage: React.FC = () => {
                                 <TableCell>Vendor</TableCell>
                                 <TableCell>Vegetables Bought</TableCell>
                                 <TableCell align="center">Orders</TableCell>
-                                <TableCell>Vegetable Buying</TableCell>
                                 <TableCell>Total Spend</TableCell>
                                 <TableCell>Last Purchase</TableCell>
                                 <TableCell align="right">Action</TableCell>
@@ -308,7 +288,6 @@ const VendorsPage: React.FC = () => {
                                         </Stack>
                                     </TableCell>
                                     <TableCell align="center"><Chip size="small" color="primary" variant="outlined" label={vendor.orders.length} /></TableCell>
-                                    <TableCell><Typography fontWeight={700}>{formatCurrency(vendor.totalProductPurchase)}</Typography></TableCell>
                                     <TableCell><Typography fontWeight={900}>{formatCurrency(vendor.grandTotal)}</Typography></TableCell>
                                     <TableCell>{new Date(vendor.lastPurchaseAt).toLocaleDateString()}</TableCell>
                                     <TableCell align="right">
@@ -317,7 +296,7 @@ const VendorsPage: React.FC = () => {
                                 </TableRow>
                             ))}
                             {!filteredVendors.length && (
-                                <TableRow><TableCell colSpan={7} align="center" sx={{ py: 6 }}><Typography color="text.secondary">No vendor matches “{searchQuery.trim()}”.</Typography></TableCell></TableRow>
+                                <TableRow><TableCell colSpan={6} align="center" sx={{ py: 6 }}><Typography color="text.secondary">No vendor matches “{searchQuery.trim()}”.</Typography></TableCell></TableRow>
                             )}
                         </TableBody>
                     </Table>
@@ -335,7 +314,6 @@ const VendorsPage: React.FC = () => {
                         <DialogContent>
                             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 3 }}>
                                 <Box sx={{ flex: 1, p: 2, borderRadius: 2, bgcolor: 'action.hover' }}><Typography variant="caption" color="text.secondary">Orders</Typography><Typography variant="h6" fontWeight={900}>{selectedVendor.orders.length}</Typography></Box>
-                                <Box sx={{ flex: 1, p: 2, borderRadius: 2, bgcolor: 'action.hover' }}><Typography variant="caption" color="text.secondary">Vegetable Buying</Typography><Typography variant="h6" fontWeight={900}>{formatCurrency(selectedVendor.totalProductPurchase)}</Typography></Box>
                                 <Box sx={{ flex: 1, p: 2, borderRadius: 2, bgcolor: 'action.hover' }}><Typography variant="caption" color="text.secondary">Rent + Labour</Typography><Typography variant="h6" fontWeight={900}>{formatCurrency(selectedVendor.totalVehicleRent + selectedVendor.totalLabourCost)}</Typography></Box>
                                 <Box sx={{ flex: 1, p: 2, borderRadius: 2, bgcolor: 'action.hover' }}><Typography variant="caption" color="text.secondary">Total Spend</Typography><Typography variant="h6" fontWeight={900}>{formatCurrency(selectedVendor.grandTotal)}</Typography></Box>
                             </Stack>
@@ -343,8 +321,8 @@ const VendorsPage: React.FC = () => {
                             <Typography fontWeight={800} sx={{ mb: 1 }}>Vegetable Summary</Typography>
                             <TableContainer component={Paper} variant="outlined" sx={{ mb: 3, borderRadius: 2 }}>
                                 <Table size="small">
-                                    <TableHead><TableRow sx={{ bgcolor: 'action.hover' }}><TableCell>Vegetable</TableCell><TableCell align="right">Total Quantity</TableCell><TableCell align="right">Total Buying</TableCell></TableRow></TableHead>
-                                    <TableBody>{selectedVendor.products.map((product) => <TableRow key={product.key}><TableCell>{product.name}</TableCell><TableCell align="right">{product.quantity}</TableCell><TableCell align="right"><Typography fontWeight={700}>{formatCurrency(product.totalPurchase)}</Typography></TableCell></TableRow>)}</TableBody>
+                                    <TableHead><TableRow sx={{ bgcolor: 'action.hover' }}><TableCell>Vegetable</TableCell><TableCell align="right">Total Quantity</TableCell></TableRow></TableHead>
+                                    <TableBody>{selectedVendor.products.map((product) => <TableRow key={product.key}><TableCell>{product.name}</TableCell><TableCell align="right"><Typography fontWeight={700}>{product.quantity}</Typography></TableCell></TableRow>)}</TableBody>
                                 </Table>
                             </TableContainer>
 
@@ -369,8 +347,6 @@ const VendorsPage: React.FC = () => {
                                             <TableCell>Date / Order</TableCell>
                                             <TableCell>Vegetable</TableCell>
                                             <TableCell align="right">Qty</TableCell>
-                                            <TableCell align="right">Unit Price</TableCell>
-                                            <TableCell align="right">Buying</TableCell>
                                             <TableCell>Gadi</TableCell>
                                             <TableCell align="right">Rent</TableCell>
                                             <TableCell align="right">Labour</TableCell>
@@ -386,8 +362,6 @@ const VendorsPage: React.FC = () => {
                                                 </TableCell>
                                                 <TableCell>{item.productName}</TableCell>
                                                 <TableCell align="right">{item.quantity}</TableCell>
-                                                <TableCell align="right">{formatCurrency(item.unitPurchasePrice)}</TableCell>
-                                                <TableCell align="right"><Typography fontWeight={700}>{formatCurrency(item.totalPurchase)}</Typography></TableCell>
                                                 <TableCell><Stack direction="row" spacing={0.75} alignItems="center"><Truck size={15} /><span>{order.vehicleNumber}</span></Stack></TableCell>
                                                 <TableCell align="right">{index === 0 ? formatCurrency(order.vehicleRent) : '—'}</TableCell>
                                                 <TableCell align="right">{index === 0 ? formatCurrency(order.labourCost) : '—'}</TableCell>

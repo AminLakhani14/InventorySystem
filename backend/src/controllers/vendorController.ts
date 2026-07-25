@@ -86,9 +86,8 @@ export const receiveVendorStock = async (req: AuthRequest, res: Response) => {
             vendorId: vendor._id,
             vendorName: vendor.name,
             vehicleNumber: 'Quick Grid', vehicleRent: 0, labourCost: 0, paymentStatus: 'unpaid',
-            items: [{ productId: product.id, productName: product.name, quantity, unitPurchasePrice: Number(req.body.unitPurchasePrice || 0), totalPurchase: quantity * Number(req.body.unitPurchasePrice || 0) }],
-            totalProductPurchase: quantity * Number(req.body.unitPurchasePrice || 0),
-            grandTotal: quantity * Number(req.body.unitPurchasePrice || 0),
+            items: [{ productId: product.id, productName: product.name, quantity }],
+            grandTotal: 0,
             receivedBy: req.user!.id, receivedByName: req.user!.name, businessId: getTenantObjectId(req.user!),
         });
         await order.save({ session });

@@ -4,8 +4,6 @@ export interface IPurchaseOrderItem {
     productId: string;
     productName: string;
     quantity: number;
-    unitPurchasePrice: number;
-    totalPurchase: number;
 }
 
 export interface IPurchaseOrder extends Document {
@@ -17,7 +15,6 @@ export interface IPurchaseOrder extends Document {
     labourCost: number;
     paymentStatus: 'paid' | 'unpaid';
     items: IPurchaseOrderItem[];
-    totalProductPurchase: number;
     grandTotal: number;
     receivedBy: mongoose.Types.ObjectId;
     receivedByName: string;
@@ -29,8 +26,6 @@ const PurchaseOrderItemSchema = new Schema<IPurchaseOrderItem>(
         productId: { type: String, required: true },
         productName: { type: String, required: true },
         quantity: { type: Number, required: true, min: 0.0001 },
-        unitPurchasePrice: { type: Number, required: true, min: 0 },
-        totalPurchase: { type: Number, required: true, min: 0 },
     },
     { _id: false }
 );
@@ -45,7 +40,6 @@ const PurchaseOrderSchema = new Schema<IPurchaseOrder>(
         labourCost: { type: Number, required: true, min: 0, default: 0 },
         paymentStatus: { type: String, enum: ['paid', 'unpaid'], required: true, default: 'unpaid' },
         items: { type: [PurchaseOrderItemSchema], required: true, validate: [(items: IPurchaseOrderItem[]) => items.length > 0, 'At least one product is required'] },
-        totalProductPurchase: { type: Number, required: true, min: 0 },
         grandTotal: { type: Number, required: true, min: 0 },
         receivedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
         receivedByName: { type: String, required: true },

@@ -13,16 +13,14 @@ interface ReceivedItem {
     productId: string;
     productName: string;
     quantity: number;
-    unitPurchasePrice: number;
-    totalPurchase: number;
 }
 
 const buildReceivedItems = async (
-    rawItems: { productId: string; quantity: number; unitPurchasePrice: number }[],
+    rawItems: { productId: string; quantity: number }[],
     tenantFilter: Record<string, unknown>,
     session: mongoose.ClientSession
 ) => {
-    const items = rawItems.map((item) => ({ ...item, quantity: Number(item.quantity), unitPurchasePrice: Number(item.unitPurchasePrice) }));
+    const items = rawItems.map((item) => ({ ...item, quantity: Number(item.quantity) }));
     const productIds = items.map((item) => item.productId);
     if (new Set(productIds).size !== productIds.length) throw new Error('Each product can only be added once to a purchase order');
 
@@ -32,7 +30,7 @@ const buildReceivedItems = async (
     const productsById = new Map(products.map((product) => [product.id, product]));
     return items.map((item) => {
         const product = productsById.get(item.productId)!;
-        return { productId: product.id, productName: product.name, quantity: item.quantity, unitPurchasePrice: item.unitPurchasePrice, totalPurchase: item.quantity * item.unitPurchasePrice };
+        return { productId: product.id, productName: product.name, quantity: item.quantity };
     }) as ReceivedItem[];
 };
 
@@ -78,7 +76,6 @@ export const createPurchaseOrder = async (req: AuthRequest, res: Response) => {
         const tenantFilter = buildTenantFilter(req.user!);
         const vendor = await getOrCreateVendor(req.body.vendorName, req, session);
         const receivedItems = await buildReceivedItems(req.body.items, tenantFilter, session);
-        const totalProductPurchase = receivedItems.reduce((total: number, item: ReceivedItem) => total + item.totalPurchase, 0);
         const vehicleRent = Number(req.body.vehicleRent);
         const labourCost = Number(req.body.labourCost);
 
@@ -91,8 +88,7 @@ export const createPurchaseOrder = async (req: AuthRequest, res: Response) => {
             labourCost,
             paymentStatus: req.body.paymentStatus,
             items: receivedItems,
-            totalProductPurchase,
-            grandTotal: totalProductPurchase + vehicleRent + labourCost,
+            grandTotal: vehicleRent + labourCost,
             receivedBy: req.user!.id,
             receivedByName: req.user!.name,
             businessId: getTenantObjectId(req.user!),
@@ -123,7 +119,6 @@ export const updatePurchaseOrder = async (req: AuthRequest, res: Response) => {
         const vendor = await getOrCreateVendor(req.body.vendorName, req, session);
 
         const receivedItems = await buildReceivedItems(req.body.items, tenantFilter, session);
-        const totalProductPurchase = receivedItems.reduce((total, item) => total + item.totalPurchase, 0);
         await applyStockChanges(order.items, -1, tenantFilter, session);
         if (order.vendorId) await applyVendorStockChanges(order.vendorId, order.items, -1, tenantFilter, getTenantObjectId(req.user!), session);
         await applyStockChanges(receivedItems, 1, tenantFilter, session);
@@ -136,8 +131,7 @@ export const updatePurchaseOrder = async (req: AuthRequest, res: Response) => {
         order.labourCost = Number(req.body.labourCost);
         order.paymentStatus = req.body.paymentStatus;
         order.items = receivedItems;
-        order.totalProductPurchase = totalProductPurchase;
-        order.grandTotal = totalProductPurchase + order.vehicleRent + order.labourCost;
+        order.grandTotal = order.vehicleRent + order.labourCost;
         await order.save({ session });
         await session.commitTransaction();
         return res.json(order);
