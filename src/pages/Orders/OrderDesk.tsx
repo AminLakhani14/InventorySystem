@@ -90,6 +90,7 @@ import {
   getProductUnitLabel,
   PRODUCT_UNITS,
 } from "../../lib/productUnits";
+import QuickSalesGrid from "./QuickSalesGrid";
 
 type CustomerType = "regular" | "credit" | "installment" | "wholesale";
 type CustomerStatus = "active" | "inactive";
@@ -2008,6 +2009,8 @@ const OrderDesk: React.FC = () => {
           {feedback.message}
         </Alert>
       )}
+
+      <QuickSalesGrid />
 
       <Grid container spacing={3} className="section-rise-delay">
         <Grid

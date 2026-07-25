@@ -46,6 +46,7 @@ interface PurchaseOrderItem {
 
 interface PurchaseOrder {
     _id: string;
+    vendorId?: string;
     orderNumber: string;
     vendorName: string;
     vehicleNumber: string;
@@ -68,6 +69,7 @@ interface ProductSummary {
 
 interface VendorSummary {
     key: string;
+    id?: string;
     name: string;
     orders: PurchaseOrder[];
     products: ProductSummary[];
@@ -76,6 +78,11 @@ interface VendorSummary {
     totalLabourCost: number;
     grandTotal: number;
     lastPurchaseAt: string;
+}
+
+interface VendorHistory {
+    products: Array<{ productId: string; productName: string; receivedQuantity: number; soldQuantity: number; availableQuantity: number }>;
+    sales: Array<{ _id: string; productName: string; amount: number; unitPrice: number; totalPrice: number; customerName: string; paymentMethod: string; timestamp: string }>;
 }
 
 const normalizeName = (value: string) => value.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
@@ -91,6 +98,7 @@ const buildVendorSummaries = (orders: PurchaseOrder[]): VendorSummary[] => {
         if (!vendor) {
             vendor = {
                 key,
+                id: order.vendorId,
                 name: order.vendorName.trim().replace(/\s+/g, ' '),
                 orders: [],
                 products: [],
@@ -112,6 +120,7 @@ const buildVendorSummaries = (orders: PurchaseOrder[]): VendorSummary[] => {
         if (new Date(order.createdAt).getTime() > new Date(vendor.lastPurchaseAt).getTime()) {
             vendor.lastPurchaseAt = order.createdAt;
             vendor.name = order.vendorName.trim().replace(/\s+/g, ' ');
+            vendor.id = order.vendorId || vendor.id;
         }
 
         order.items.forEach((item) => {
@@ -147,6 +156,19 @@ const VendorsPage: React.FC = () => {
     const [error, setError] = React.useState('');
     const [searchQuery, setSearchQuery] = React.useState('');
     const [selectedVendor, setSelectedVendor] = React.useState<VendorSummary | null>(null);
+    const [vendorHistory, setVendorHistory] = React.useState<VendorHistory | null>(null);
+    const [historyLoading, setHistoryLoading] = React.useState(false);
+
+    React.useEffect(() => {
+        if (!selectedVendor?.id) { setVendorHistory(null); return; }
+        let active = true;
+        setHistoryLoading(true);
+        api.get<VendorHistory>(`/vendors/${selectedVendor.id}/history`)
+            .then((response) => { if (active) setVendorHistory(response.data); })
+            .catch(() => { if (active) setVendorHistory(null); })
+            .finally(() => { if (active) setHistoryLoading(false); });
+        return () => { active = false; };
+    }, [selectedVendor]);
 
     const loadVendors = React.useCallback(async () => {
         setLoading(true);
@@ -325,6 +347,18 @@ const VendorsPage: React.FC = () => {
                                     <TableBody>{selectedVendor.products.map((product) => <TableRow key={product.key}><TableCell>{product.name}</TableCell><TableCell align="right">{product.quantity}</TableCell><TableCell align="right"><Typography fontWeight={700}>{formatCurrency(product.totalPurchase)}</Typography></TableCell></TableRow>)}</TableBody>
                                 </Table>
                             </TableContainer>
+
+                            {selectedVendor.id && <>
+                                <Typography fontWeight={800} sx={{ mb: 1 }}>Current Vendor Stock & Customer Sales</Typography>
+                                {historyLoading ? <Box sx={{ py: 2, display: 'grid', placeItems: 'center' }}><CircularProgress size={24} /></Box> : vendorHistory && <>
+                                    <TableContainer component={Paper} variant="outlined" sx={{ mb: 2, borderRadius: 2 }}>
+                                        <Table size="small"><TableHead><TableRow sx={{ bgcolor: 'action.hover' }}><TableCell>Vegetable</TableCell><TableCell align="right">Received</TableCell><TableCell align="right">Sold</TableCell><TableCell align="right">Available</TableCell></TableRow></TableHead><TableBody>{vendorHistory.products.map((product) => <TableRow key={product.productId}><TableCell>{product.productName}</TableCell><TableCell align="right">{product.receivedQuantity}</TableCell><TableCell align="right">{product.soldQuantity}</TableCell><TableCell align="right"><Typography fontWeight={800}>{product.availableQuantity}</Typography></TableCell></TableRow>)}</TableBody></Table>
+                                    </TableContainer>
+                                    <TableContainer component={Paper} variant="outlined" sx={{ mb: 3, borderRadius: 2 }}>
+                                        <Table size="small"><TableHead><TableRow sx={{ bgcolor: 'action.hover' }}><TableCell>Customer Sale</TableCell><TableCell>Vegetable</TableCell><TableCell align="right">Qty</TableCell><TableCell align="right">Rate</TableCell><TableCell align="right">Total</TableCell><TableCell>Payment</TableCell><TableCell>Date</TableCell></TableRow></TableHead><TableBody>{vendorHistory.sales.length ? vendorHistory.sales.map((sale) => <TableRow key={sale._id}><TableCell>{sale.customerName || 'Anonymous'}</TableCell><TableCell>{sale.productName}</TableCell><TableCell align="right">{sale.amount}</TableCell><TableCell align="right">{formatCurrency(sale.unitPrice)}</TableCell><TableCell align="right">{formatCurrency(sale.totalPrice)}</TableCell><TableCell>{sale.paymentMethod}</TableCell><TableCell>{new Date(sale.timestamp).toLocaleString()}</TableCell></TableRow>) : <TableRow><TableCell colSpan={7} align="center">No vendor-linked sales yet.</TableCell></TableRow>}</TableBody></Table>
+                                    </TableContainer>
+                                </>}
+                            </>}
 
                             <Divider sx={{ my: 2 }} />
                             <Typography fontWeight={800} sx={{ mb: 1 }}>Purchase Detail</Typography>

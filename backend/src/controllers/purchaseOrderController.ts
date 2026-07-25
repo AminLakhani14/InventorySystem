@@ -2,8 +2,10 @@ import { Response } from 'express';
 import mongoose from 'mongoose';
 import PurchaseOrder from '../models/PurchaseOrder';
 import Product from '../models/Product';
+import VendorStock from '../models/VendorStock';
 import type { AuthRequest } from '../middleware/auth';
 import { buildTenantFilter, getTenantObjectId } from '../utils/tenancy';
+import { getOrCreateVendor } from './vendorController';
 
 const buildOrderNumber = () => `PO-${Date.now()}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
 
@@ -40,6 +42,25 @@ const applyStockChanges = async (items: ReceivedItem[], multiplier: number, tena
     }
 };
 
+const applyVendorStockChanges = async (vendorId: mongoose.Types.ObjectId, items: ReceivedItem[], multiplier: number, tenantFilter: Record<string, unknown>, businessId: mongoose.Types.ObjectId | null, session: mongoose.ClientSession) => {
+    for (const item of items) {
+        if (multiplier < 0) {
+            const stock = await VendorStock.findOneAndUpdate(
+                { vendorId, productId: item.productId, ...tenantFilter, availableQuantity: { $gte: item.quantity } },
+                { $inc: { availableQuantity: -item.quantity } },
+                { new: true, session },
+            );
+            if (!stock) throw new Error(`Cannot reduce ${item.productName}; some of this vendor stock has already been sold`);
+        } else {
+            await VendorStock.findOneAndUpdate(
+                { vendorId, productId: item.productId, ...tenantFilter },
+                { $inc: { availableQuantity: item.quantity }, $set: { productName: item.productName }, $setOnInsert: { businessId } },
+                { new: true, upsert: true, session, setDefaultsOnInsert: true },
+            );
+        }
+    }
+};
+
 export const getPurchaseOrders = async (req: AuthRequest, res: Response) => {
     try {
         const orders = await PurchaseOrder.find(buildTenantFilter(req.user!)).sort({ createdAt: -1 });
@@ -55,6 +76,7 @@ export const createPurchaseOrder = async (req: AuthRequest, res: Response) => {
     try {
         session.startTransaction();
         const tenantFilter = buildTenantFilter(req.user!);
+        const vendor = await getOrCreateVendor(req.body.vendorName, req, session);
         const receivedItems = await buildReceivedItems(req.body.items, tenantFilter, session);
         const totalProductPurchase = receivedItems.reduce((total: number, item: ReceivedItem) => total + item.totalPurchase, 0);
         const vehicleRent = Number(req.body.vehicleRent);
@@ -62,6 +84,7 @@ export const createPurchaseOrder = async (req: AuthRequest, res: Response) => {
 
         const order = new PurchaseOrder({
             orderNumber: buildOrderNumber(),
+            vendorId: vendor._id,
             vendorName: req.body.vendorName,
             vehicleNumber: req.body.vehicleNumber,
             vehicleRent,
@@ -76,6 +99,7 @@ export const createPurchaseOrder = async (req: AuthRequest, res: Response) => {
         });
 
         await applyStockChanges(receivedItems, 1, tenantFilter, session);
+        await applyVendorStockChanges(vendor._id, receivedItems, 1, tenantFilter, getTenantObjectId(req.user!), session);
 
         await order.save({ session });
         await session.commitTransaction();
@@ -96,11 +120,16 @@ export const updatePurchaseOrder = async (req: AuthRequest, res: Response) => {
         const order = await PurchaseOrder.findOne({ _id: req.params.id, ...tenantFilter }).session(session);
         if (!order) throw new Error('Purchase order not found');
 
+        const vendor = await getOrCreateVendor(req.body.vendorName, req, session);
+
         const receivedItems = await buildReceivedItems(req.body.items, tenantFilter, session);
         const totalProductPurchase = receivedItems.reduce((total, item) => total + item.totalPurchase, 0);
         await applyStockChanges(order.items, -1, tenantFilter, session);
+        if (order.vendorId) await applyVendorStockChanges(order.vendorId, order.items, -1, tenantFilter, getTenantObjectId(req.user!), session);
         await applyStockChanges(receivedItems, 1, tenantFilter, session);
+        await applyVendorStockChanges(vendor._id, receivedItems, 1, tenantFilter, getTenantObjectId(req.user!), session);
 
+        order.vendorId = vendor._id;
         order.vendorName = req.body.vendorName;
         order.vehicleNumber = req.body.vehicleNumber;
         order.vehicleRent = Number(req.body.vehicleRent);
@@ -128,6 +157,7 @@ export const deletePurchaseOrder = async (req: AuthRequest, res: Response) => {
         const order = await PurchaseOrder.findOne({ _id: req.params.id, ...tenantFilter }).session(session);
         if (!order) throw new Error('Purchase order not found');
         await applyStockChanges(order.items, -1, tenantFilter, session);
+        if (order.vendorId) await applyVendorStockChanges(order.vendorId, order.items, -1, tenantFilter, getTenantObjectId(req.user!), session);
         await order.deleteOne({ session });
         await session.commitTransaction();
         return res.status(204).send();

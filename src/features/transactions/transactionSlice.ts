@@ -20,6 +20,8 @@ export interface Transaction {
     closingCredit?: number;
     customerName?: string;
     customerCnic?: string;
+    vendorId?: string;
+    vendorName?: string;
     unitCost?: number;
     unitPrice?: number;
     grossProfit?: number;

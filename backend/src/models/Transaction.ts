@@ -19,6 +19,8 @@ export interface ITransaction extends Document {
     closingCredit?: number;
     customerName?: string;
     customerCnic?: string;
+    vendorId?: mongoose.Types.ObjectId;
+    vendorName?: string;
     unitCost?: number;
     unitPrice?: number;
     grossProfit?: number;
@@ -44,6 +46,8 @@ const TransactionSchema: Schema = new Schema({
     closingCredit: { type: Number, default: 0 },
     customerName: { type: String, default: '' },
     customerCnic: { type: String, default: '' },
+    vendorId: { type: Schema.Types.ObjectId, ref: 'Vendor', default: null, index: true },
+    vendorName: { type: String, default: '', trim: true, index: true },
     unitCost: { type: Number, default: 0 },
     unitPrice: { type: Number, default: 0 },
     grossProfit: { type: Number, default: 0 },
