@@ -42,7 +42,6 @@ const QuickSalesGrid: React.FC = () => {
     const [receiveVendor, setReceiveVendor] = React.useState<{ id: string; name: string } | null>(null);
     const [receiveProductId, setReceiveProductId] = React.useState('');
     const [receiveQuantity, setReceiveQuantity] = React.useState('');
-    const [receivePrice, setReceivePrice] = React.useState('');
 
     const load = React.useCallback(async () => {
         setLoading(true); setError('');
@@ -95,8 +94,8 @@ const QuickSalesGrid: React.FC = () => {
     const receiveStock = async () => {
         if (!receiveVendor || !receiveProductId || num(receiveQuantity) <= 0) { setError('Select a product and enter a valid received quantity.'); return; }
         try {
-            await api.post(`/vendors/${receiveVendor.id}/receive`, { productId: receiveProductId, quantity: num(receiveQuantity), unitPurchasePrice: num(receivePrice) });
-            setReceiveVendor(null); setReceiveProductId(''); setReceiveQuantity(''); setReceivePrice(''); await load();
+            await api.post(`/vendors/${receiveVendor.id}/receive`, { productId: receiveProductId, quantity: num(receiveQuantity) });
+            setReceiveVendor(null); setReceiveProductId(''); setReceiveQuantity(''); await load();
             setMessage('Vendor stock received. The vendor now appears in today’s dropdown.');
         } catch (requestError: any) { setError(requestError?.response?.data?.message || 'Unable to receive vendor stock.'); }
     };
@@ -155,7 +154,7 @@ const QuickSalesGrid: React.FC = () => {
         </CardContent>
         <Dialog open={customerOpen} onClose={() => setCustomerOpen(false)} fullWidth maxWidth="xs"><DialogTitle>Add Customer</DialogTitle><DialogContent><TextField autoFocus fullWidth label="Customer name" sx={{ mt: 1.5, mb: 1.5 }} value={customerName} onChange={(event) => setCustomerName(event.target.value)} /><TextField fullWidth label="Phone number" value={customerPhone} onChange={(event) => setCustomerPhone(event.target.value)} /></DialogContent><DialogActions><Button onClick={() => setCustomerOpen(false)}>Cancel</Button><Button variant="contained" onClick={() => void createCustomer()}>Add to grid</Button></DialogActions></Dialog>
         <Dialog open={vendorOpen} onClose={() => setVendorOpen(false)} fullWidth maxWidth="xs"><DialogTitle>Add Vendor</DialogTitle><DialogContent><TextField autoFocus fullWidth label="Vendor name" sx={{ mt: 1.5 }} value={vendorName} onChange={(event) => setVendorName(event.target.value)} helperText="You will record today’s received stock next." /></DialogContent><DialogActions><Button onClick={() => setVendorOpen(false)}>Cancel</Button><Button variant="contained" onClick={() => void createVendor()}>Create vendor</Button></DialogActions></Dialog>
-        <Dialog open={Boolean(receiveVendor)} onClose={() => setReceiveVendor(null)} fullWidth maxWidth="xs"><DialogTitle>Receive Stock — {receiveVendor?.name}</DialogTitle><DialogContent><TextField select fullWidth label="Vegetable" sx={{ mt: 1.5, mb: 1.5 }} value={receiveProductId} onChange={(event) => setReceiveProductId(event.target.value)}><MenuItem value="">Select vegetable</MenuItem>{products.map((product) => <MenuItem key={product.id} value={product.id}>{product.name}</MenuItem>)}</TextField><TextField fullWidth type="number" label="Received quantity" sx={{ mb: 1.5 }} value={receiveQuantity} onChange={(event) => setReceiveQuantity(event.target.value)} /><TextField fullWidth type="number" label="Purchase price (optional)" value={receivePrice} onChange={(event) => setReceivePrice(event.target.value)} /></DialogContent><DialogActions><Button onClick={() => setReceiveVendor(null)}>Cancel</Button><Button variant="contained" startIcon={<PackagePlus size={16} />} onClick={() => void receiveStock()}>Receive stock</Button></DialogActions></Dialog>
+        <Dialog open={Boolean(receiveVendor)} onClose={() => setReceiveVendor(null)} fullWidth maxWidth="xs"><DialogTitle>Receive Stock — {receiveVendor?.name}</DialogTitle><DialogContent><TextField select fullWidth label="Vegetable" sx={{ mt: 1.5, mb: 1.5 }} value={receiveProductId} onChange={(event) => setReceiveProductId(event.target.value)}><MenuItem value="">Select vegetable</MenuItem>{products.map((product) => <MenuItem key={product.id} value={product.id}>{product.name}</MenuItem>)}</TextField><TextField fullWidth type="number" label="Received quantity" value={receiveQuantity} onChange={(event) => setReceiveQuantity(event.target.value)} /></DialogContent><DialogActions><Button onClick={() => setReceiveVendor(null)}>Cancel</Button><Button variant="contained" startIcon={<PackagePlus size={16} />} onClick={() => void receiveStock()}>Receive stock</Button></DialogActions></Dialog>
     </Card>;
 };
 

@@ -17,7 +17,7 @@ import {
     Stack,
 } from '@mui/material';
 import { alpha, useTheme } from '@mui/material/styles';
-import { ArrowLeft, Download, TrendingDown, BarChart as BarChartIcon } from 'lucide-react';
+import { ArrowLeft, Download, HandCoins, TrendingDown, BarChart as BarChartIcon } from 'lucide-react';
 import { useDispatch, useSelector } from 'react-redux';
 import type { AppDispatch, RootState } from '../../store';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from 'recharts';
@@ -60,6 +60,13 @@ const ReportsPage: React.FC = () => {
         timestamp: string;
     }>>([]);
     const [paymentDetailsLoading, setPaymentDetailsLoading] = useState(false);
+    const [collectionDate, setCollectionDate] = useState(() => new Date().toISOString().split('T')[0]);
+    const [collection, setCollection] = useState<{
+        summary: { todaysCollection: number; cashCollection: number; creditCollection: number };
+        last7Days: Array<{ _id: string; amount: number }>;
+        last7Months: Array<{ _id: string; amount: number }>;
+    } | null>(null);
+    const [collectionError, setCollectionError] = useState('');
 
     const loadCustomerPayments = async (filters: ReportFilters) => {
         try {
@@ -131,6 +138,15 @@ const ReportsPage: React.FC = () => {
         link.click();
         URL.revokeObjectURL(link.href);
     };
+
+    useEffect(() => {
+        setCollectionError('');
+        api.get('/reports/collections-dashboard', { params: { date: collectionDate } })
+            .then((response) => setCollection(response.data))
+            .catch((requestError: unknown) => setCollectionError(
+                (requestError as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Unable to load collection recovery charts.',
+            ));
+    }, [collectionDate]);
 
     useEffect(() => {
         dispatch(fetchProducts());
@@ -264,6 +280,22 @@ const ReportsPage: React.FC = () => {
         [topSelling, products],
     );
 
+    const collectionDayChart = useMemo(
+        () => collection?.last7Days.map((row) => ({
+            name: new Date(`${row._id}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+            collection: row.amount,
+        })) || [],
+        [collection],
+    );
+
+    const collectionMonthChart = useMemo(
+        () => collection?.last7Months.map((row) => ({
+            name: new Date(`${row._id}-01T00:00:00`).toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
+            collection: row.amount,
+        })) || [],
+        [collection],
+    );
+
     const totalProfit = useMemo(() => salesTrend.reduce((sum, point) => sum + (point.profit || 0), 0), [salesTrend]);
     const totalCustomerPayments = useMemo(
         () => customerPayments.reduce((sum, row) => sum + Number(row.totalReceived || 0), 0),
@@ -324,6 +356,7 @@ const ReportsPage: React.FC = () => {
                 </Alert>
             )}
             {paymentReportError && <Alert severity="error" sx={{ mb: 3 }}>{paymentReportError}</Alert>}
+            {collectionError && <Alert severity="error" sx={{ mb: 3 }}>{collectionError}</Alert>}
 
             <Alert severity={totalProfit >= 0 ? 'success' : 'warning'} sx={{ mb: 3 }}>
                 Total profit/loss for {reportHeading.toLowerCase()}:{' '}
@@ -398,6 +431,75 @@ const ReportsPage: React.FC = () => {
                                     </BarChart>
                                 </ResponsiveContainer>
                             </Box>
+                        </CardContent>
+                    </Card>
+                </Grid>
+
+                <Grid size={12}>
+                    <Card sx={{ borderRadius: 4 }}>
+                        <CardContent>
+                            <Stack
+                                direction={{ xs: 'column', sm: 'row' }}
+                                justifyContent="space-between"
+                                alignItems={{ xs: 'stretch', sm: 'center' }}
+                                spacing={2}
+                                sx={{ mb: 1 }}
+                            >
+                                <Box>
+                                    <Typography variant="h6" fontWeight={700} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                        <HandCoins size={20} /> Today's Collection Recovery
+                                    </Typography>
+                                    <Typography variant="body2" color="text.secondary">
+                                        Daily and monthly recovery trend for the selected collection date.
+                                    </Typography>
+                                </Box>
+                                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'stretch', sm: 'center' }}>
+                                    {collection && (
+                                        <Stack direction="row" spacing={2}>
+                                            {[
+                                                { label: 'COLLECTED', value: collection.summary.todaysCollection, color: 'success.main' },
+                                                { label: 'CASH', value: collection.summary.cashCollection, color: 'primary.main' },
+                                                { label: 'CREDIT RECOVERY', value: collection.summary.creditCollection, color: 'secondary.main' },
+                                            ].map((stat) => (
+                                                <Box key={stat.label}>
+                                                    <Typography variant="caption" color="text.secondary">{stat.label}</Typography>
+                                                    <Typography variant="h6" fontWeight={900} color={stat.color}>
+                                                        {formatCurrency(stat.value, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                                    </Typography>
+                                                </Box>
+                                            ))}
+                                        </Stack>
+                                    )}
+                                    <AppDatePicker
+                                        size="small"
+                                        label="Collection Date"
+                                        value={collectionDate}
+                                        onChange={setCollectionDate}
+                                        maxDate={new Date().toISOString().split('T')[0]}
+                                    />
+                                </Stack>
+                            </Stack>
+                            <Grid container spacing={3}>
+                                {[
+                                    { title: 'Last 7 Days Recovery', rows: collectionDayChart },
+                                    { title: 'Last 7 Months Recovery', rows: collectionMonthChart },
+                                ].map((chart) => (
+                                    <Grid key={chart.title} size={{ xs: 12, md: 6 }}>
+                                        <Typography variant="subtitle2" fontWeight={700} color="text.secondary">{chart.title}</Typography>
+                                        <Box sx={{ height: { xs: 240, sm: 280 }, mt: 1.5 }}>
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <BarChart data={chart.rows}>
+                                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={alpha(theme.palette.text.primary, 0.1)} />
+                                                    <XAxis dataKey="name" axisLine={false} tickLine={false} interval="preserveStartEnd" minTickGap={8} />
+                                                    <YAxis axisLine={false} tickLine={false} />
+                                                    <Tooltip formatter={(value: number | string | undefined) => [formatCurrency(Number(value || 0)), `Recovery (${currency})`]} />
+                                                    <Bar dataKey="collection" fill={theme.palette.success.main} radius={[6, 6, 0, 0]} name={`Recovery (${currency})`} />
+                                                </BarChart>
+                                            </ResponsiveContainer>
+                                        </Box>
+                                    </Grid>
+                                ))}
+                            </Grid>
                         </CardContent>
                     </Card>
                 </Grid>

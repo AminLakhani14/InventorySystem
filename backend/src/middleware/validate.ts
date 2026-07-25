@@ -192,7 +192,6 @@ export const purchaseOrderSchema = Joi.object({
         Joi.object({
             productId: Joi.string().required(),
             quantity: Joi.number().positive().required(),
-            unitPurchasePrice: Joi.number().min(0).required(),
         })
     ).required(),
 });
