@@ -37,7 +37,7 @@ export const createVendor = async (req: AuthRequest, res: Response) => {
     }
 };
 
-export const getTodayVendorAvailability = async (req: AuthRequest, res: Response) => {
+export const getAvailableVendorStock = async (req: AuthRequest, res: Response) => {
     try {
         const tenant = buildTenantFilter(req.user!);
         const stocks = await VendorStock.find({ ...tenant, availableQuantity: { $gt: 0 } })

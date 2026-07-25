@@ -19,9 +19,36 @@ interface AvailableProduct { productId: string; productName: string; availableQu
 interface AvailableVendor { vendorId: string; vendorName: string; products: AvailableProduct[]; }
 interface SaleLine { id: string; vendorId: string; productId: string; quantity: string; unitPrice: string; }
 interface CustomerSaleRow { customer: Customer; lines: SaleLine[]; saving: boolean; }
+interface QuickSalesGridDraftRow { customerId: string; lines: SaleLine[]; }
 
 const blankLine = (): SaleLine => ({ id: `${Date.now()}-${Math.random()}`, vendorId: '', productId: '', quantity: '', unitPrice: '' });
 const num = (value: string) => Math.max(Number(value) || 0, 0);
+const QUICK_SALES_GRID_DRAFT_STORAGE_KEY = 'itemhive-quick-sales-grid-draft';
+const hasLineData = (line: SaleLine) => Boolean(line.vendorId || line.productId || line.quantity || line.unitPrice);
+
+const loadQuickSalesGridDraft = (): QuickSalesGridDraftRow[] => {
+    try {
+        const raw = localStorage.getItem(QUICK_SALES_GRID_DRAFT_STORAGE_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        if (!Array.isArray(parsed)) return [];
+
+        return parsed.flatMap((row): QuickSalesGridDraftRow[] => {
+            if (!row || typeof row.customerId !== 'string' || !Array.isArray(row.lines)) return [];
+            const lines = row.lines.filter((line: unknown): line is SaleLine => {
+                if (!line || typeof line !== 'object') return false;
+                const candidate = line as Partial<SaleLine>;
+                return typeof candidate.id === 'string'
+                    && typeof candidate.vendorId === 'string'
+                    && typeof candidate.productId === 'string'
+                    && typeof candidate.quantity === 'string'
+                    && typeof candidate.unitPrice === 'string';
+            });
+            return lines.length ? [{ customerId: row.customerId, lines }] : [];
+        });
+    } catch {
+        return [];
+    }
+};
 
 const QuickSalesGrid: React.FC = () => {
     const dispatch = useDispatch<AppDispatch>();
@@ -30,6 +57,7 @@ const QuickSalesGrid: React.FC = () => {
     const [products, setProducts] = React.useState<Product[]>([]);
     const [vendors, setVendors] = React.useState<AvailableVendor[]>([]);
     const [rows, setRows] = React.useState<CustomerSaleRow[]>([]);
+    const [gridLoaded, setGridLoaded] = React.useState(false);
     const [loading, setLoading] = React.useState(true);
     const [error, setError] = React.useState('');
     const [message, setMessage] = React.useState('');
@@ -42,23 +70,45 @@ const QuickSalesGrid: React.FC = () => {
     const [receiveProductId, setReceiveProductId] = React.useState('');
     const [receiveQuantity, setReceiveQuantity] = React.useState('');
     const [receivePrice, setReceivePrice] = React.useState('');
+    const savedDraftRows = React.useMemo(() => loadQuickSalesGridDraft(), []);
 
     const load = React.useCallback(async () => {
         setLoading(true); setError('');
         try {
             const [customerResponse, productResponse, vendorResponse] = await Promise.all([
-                api.get<Customer[]>('/customers'), api.get<Product[]>('/products'), api.get<AvailableVendor[]>('/vendors/today-availability'),
+                api.get<Customer[]>('/customers'), api.get<Product[]>('/products'), api.get<AvailableVendor[]>('/vendors/available-stock'),
             ]);
             const activeCustomers = customerResponse.data.filter((customer) => customer.status === 'active');
             setCustomers(activeCustomers); setProducts(productResponse.data); setVendors(vendorResponse.data);
-            setRows((current) => current.length
-                ? current.map((row) => ({ ...row, customer: activeCustomers.find((customer) => customer._id === row.customer._id) || row.customer }))
-                : activeCustomers.map((customer) => ({ customer, lines: [blankLine()], saving: false })));
+            setRows((current) => {
+                const currentRows = new Map(current.map((row) => [row.customer._id, row]));
+                const draftRows = new Map(savedDraftRows.map((row) => [row.customerId, row]));
+                return activeCustomers.map((customer) => {
+                    const currentRow = currentRows.get(customer._id);
+                    if (currentRow) return { ...currentRow, customer };
+                    const draftRow = draftRows.get(customer._id);
+                    return { customer, lines: draftRow?.lines || [blankLine()], saving: false };
+                });
+            });
+            setGridLoaded(true);
         } catch (requestError: any) { setError(requestError?.response?.data?.message || 'Unable to load the quick sales grid.'); }
         finally { setLoading(false); }
-    }, []);
+    }, [savedDraftRows]);
 
     React.useEffect(() => { void load(); }, [load]);
+    React.useEffect(() => {
+        if (!gridLoaded) return;
+        const draftRows = rows
+            .map((row) => ({ customerId: row.customer._id, lines: row.lines.filter(hasLineData) }))
+            .filter((row) => row.lines.length > 0);
+
+        try {
+            if (draftRows.length) localStorage.setItem(QUICK_SALES_GRID_DRAFT_STORAGE_KEY, JSON.stringify(draftRows));
+            else localStorage.removeItem(QUICK_SALES_GRID_DRAFT_STORAGE_KEY);
+        } catch {
+            // Keep the grid usable if browser storage is unavailable.
+        }
+    }, [gridLoaded, rows]);
     const updateRow = (customerId: string, update: (row: CustomerSaleRow) => CustomerSaleRow) => setRows((current) => current.map((row) => row.customer._id === customerId ? update(row) : row));
     const vendorFor = (vendorId: string) => vendors.find((vendor) => vendor.vendorId === vendorId);
     const productFor = (vendorId: string, productId: string) => vendorFor(vendorId)?.products.find((product) => product.productId === productId);
@@ -140,22 +190,96 @@ const QuickSalesGrid: React.FC = () => {
             {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>{error}</Alert>}
             {message && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setMessage('')}>{message}</Alert>}
             {!vendors.length && <Alert severity="info" sx={{ mb: 2 }}>No vendor has stock remaining. Add a vendor and receive stock to begin.</Alert>}
-            <TableContainer sx={{ maxHeight: 660, border: '1px solid', borderColor: 'divider', borderRadius: 1.5 }}><Table size="small" stickyHeader sx={{ minWidth: 1190 }}>
-                <TableHead><TableRow><TableCell>Customer</TableCell><TableCell>Vendor</TableCell><TableCell>Vegetable</TableCell><TableCell align="right">Qty</TableCell><TableCell align="right">Sale Price</TableCell><TableCell align="right">Amount</TableCell><TableCell align="center">Item</TableCell><TableCell>Sale</TableCell><TableCell align="right">Action</TableCell></TableRow></TableHead>
-                {rows.map((row) => <TableBody key={row.customer._id}>{row.lines.map((line, index) => {
-                    const productsForVendor = vendorFor(line.vendorId)?.products || []; const selectedProduct = productFor(line.vendorId, line.productId); const total = rowTotal(row);
-                    return <TableRow key={line.id}>
-                        {index === 0 && <TableCell rowSpan={row.lines.length} sx={{ minWidth: 150, verticalAlign: 'top' }}><Typography fontWeight={800}>{row.customer.fullName}</Typography><Typography variant="caption" color="text.secondary">{row.customer.phoneNumber}</Typography></TableCell>}
-                        <TableCell sx={{ minWidth: 155 }}><TextField select fullWidth size="small" value={line.vendorId} onChange={(event) => selectVendor(row.customer._id, line.id, event.target.value)}><MenuItem value="">Select vendor</MenuItem>{vendors.map((vendor) => <MenuItem key={vendor.vendorId} value={vendor.vendorId}>{vendor.vendorName} ({vendor.products.reduce((sum, product) => sum + product.availableQuantity, 0)} remaining)</MenuItem>)}</TextField></TableCell>
-                        <TableCell sx={{ minWidth: 180 }}><TextField select fullWidth size="small" disabled={!line.vendorId} value={line.productId} onChange={(event) => selectProduct(row.customer._id, line.id, event.target.value)}><MenuItem value="">Select vegetable</MenuItem>{productsForVendor.map((product) => <MenuItem key={product.productId} value={product.productId}>{product.productName} ({product.availableQuantity} available)</MenuItem>)}</TextField></TableCell>
-                        <TableCell sx={{ width: 100 }}><TextField fullWidth size="small" type="number" disabled={!line.productId} value={line.quantity} inputProps={{ min: 0, max: selectedProduct?.availableQuantity || 0 }} onChange={(event) => updateLine(row.customer._id, line.id, { quantity: event.target.value })} /></TableCell>
-                        <TableCell sx={{ width: 125 }}><TextField fullWidth size="small" type="number" disabled={!line.productId} value={line.unitPrice} InputProps={{ startAdornment: <Typography variant="caption">{currencySymbol}</Typography> }} onChange={(event) => updateLine(row.customer._id, line.id, { unitPrice: event.target.value })} /></TableCell>
-                        <TableCell align="right" sx={{ fontWeight: 800 }}>{formatCurrency(lineTotal(line), { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</TableCell>
-                        <TableCell align="center" sx={{ width: 72 }}><Button aria-label="Remove item" title="Remove item" size="small" color="error" disabled={row.lines.length === 1} onClick={() => removeLine(row.customer._id, line.id)} sx={{ minWidth: 36, px: 0.75 }}><Trash2 size={16} /></Button></TableCell>
-                        {index === 0 && <TableCell rowSpan={row.lines.length} sx={{ minWidth: 100, verticalAlign: 'top' }}><Chip label="Credit" color="warning" size="small" sx={{ fontWeight: 800 }} /></TableCell>}
-                        {index === 0 && <TableCell rowSpan={row.lines.length} align="right" sx={{ minWidth: 135, verticalAlign: 'top' }}><Typography variant="caption" color="text.secondary">Total</Typography><Typography fontWeight={900} sx={{ mb: 1 }}>{formatCurrency(total, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</Typography><Button fullWidth size="small" startIcon={<Plus size={15} />} sx={{ mb: 1 }} onClick={() => updateRow(row.customer._id, (current) => ({ ...current, lines: [...current.lines, blankLine()] }))}>Add item</Button><Button fullWidth variant="contained" size="small" startIcon={<Save size={15} />} disabled={row.saving} onClick={() => void completeSale(row)}>{row.saving ? 'Saving…' : 'Save Credit Sale'}</Button></TableCell>}
-                    </TableRow>;
-                })}</TableBody>)}</Table>
+            <TableContainer sx={{ maxHeight: 660, border: '1px solid', borderColor: 'divider', borderRadius: 1.5 }}>
+                <Table
+                    size="small"
+                    stickyHeader
+                    sx={{
+                        minWidth: 1370,
+                        tableLayout: 'fixed',
+                        '& .MuiTableCell-root': { px: 1.25, py: 1, verticalAlign: 'middle' },
+                        '& .MuiTableCell-head': { bgcolor: 'background.paper', color: 'text.secondary', fontSize: 11, fontWeight: 900, letterSpacing: 0.35, textTransform: 'uppercase', whiteSpace: 'nowrap' },
+                    }}
+                >
+                    <TableHead>
+                        <TableRow>
+                            <TableCell sx={{ width: 185 }}>Customer</TableCell>
+                            <TableCell sx={{ width: 190 }}>Vendor</TableCell>
+                            <TableCell sx={{ width: 220 }}>Vegetable</TableCell>
+                            <TableCell align="right" sx={{ width: 90 }}>Qty</TableCell>
+                            <TableCell align="right" sx={{ width: 120 }}>Sale price</TableCell>
+                            <TableCell align="right" sx={{ width: 120 }}>Amount</TableCell>
+                            <TableCell align="right" sx={{ width: 130 }}>Order total</TableCell>
+                            <TableCell align="center" sx={{ width: 66 }}>Remove</TableCell>
+                            <TableCell align="center" sx={{ width: 90 }}>Sale</TableCell>
+                            <TableCell align="center" sx={{ width: 145 }}>Actions</TableCell>
+                        </TableRow>
+                    </TableHead>
+                    {rows.map((row) => (
+                        <TableBody key={row.customer._id}>
+                            {row.lines.map((line, index) => {
+                                const productsForVendor = vendorFor(line.vendorId)?.products || [];
+                                const selectedProduct = productFor(line.vendorId, line.productId);
+                                const total = rowTotal(row);
+
+                                return (
+                                    <TableRow key={line.id} hover>
+                                        {index === 0 && (
+                                            <TableCell rowSpan={row.lines.length} sx={{ verticalAlign: 'middle', bgcolor: 'action.hover' }}>
+                                                <Typography fontWeight={800} noWrap>{row.customer.fullName}</Typography>
+                                                <Typography variant="caption" color="text.secondary" noWrap>{row.customer.phoneNumber}</Typography>
+                                            </TableCell>
+                                        )}
+                                        <TableCell>
+                                            <TextField select fullWidth size="small" disabled={row.saving} value={line.vendorId} onChange={(event) => selectVendor(row.customer._id, line.id, event.target.value)}>
+                                                <MenuItem value="">Select vendor</MenuItem>
+                                                {vendors.map((vendor) => <MenuItem key={vendor.vendorId} value={vendor.vendorId}>{vendor.vendorName} ({vendor.products.reduce((sum, product) => sum + product.availableQuantity, 0)} remaining)</MenuItem>)}
+                                            </TextField>
+                                        </TableCell>
+                                        <TableCell>
+                                            <TextField select fullWidth size="small" disabled={!line.vendorId || row.saving} value={line.productId} onChange={(event) => selectProduct(row.customer._id, line.id, event.target.value)}>
+                                                <MenuItem value="">Select vegetable</MenuItem>
+                                                {productsForVendor.map((product) => <MenuItem key={product.productId} value={product.productId}>{product.productName} ({product.availableQuantity} available)</MenuItem>)}
+                                            </TextField>
+                                        </TableCell>
+                                        <TableCell>
+                                            <TextField fullWidth size="small" type="number" disabled={!line.productId || row.saving} value={line.quantity} inputProps={{ min: 0, max: selectedProduct?.availableQuantity || 0, style: { textAlign: 'right' } }} onChange={(event) => updateLine(row.customer._id, line.id, { quantity: event.target.value })} />
+                                        </TableCell>
+                                        <TableCell>
+                                            <TextField fullWidth size="small" type="number" disabled={!line.productId || row.saving} value={line.unitPrice} InputProps={{ startAdornment: <Typography variant="caption">{currencySymbol}</Typography> }} inputProps={{ style: { textAlign: 'right' } }} onChange={(event) => updateLine(row.customer._id, line.id, { unitPrice: event.target.value })} />
+                                        </TableCell>
+                                        <TableCell align="right" sx={{ fontWeight: 800, whiteSpace: 'nowrap' }}>
+                                            {formatCurrency(lineTotal(line), { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                        </TableCell>
+                                        {index === 0 && (
+                                            <TableCell rowSpan={row.lines.length} align="right" sx={{ verticalAlign: 'middle', fontWeight: 900, whiteSpace: 'nowrap', bgcolor: 'action.hover' }}>
+                                                {formatCurrency(total, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                            </TableCell>
+                                        )}
+                                        <TableCell align="center">
+                                            <Button aria-label="Remove item" title="Remove item" size="small" color="error" disabled={row.lines.length === 1 || row.saving} onClick={() => removeLine(row.customer._id, line.id)} sx={{ minWidth: 36, px: 0.75 }}>
+                                                <Trash2 size={16} />
+                                            </Button>
+                                        </TableCell>
+                                        {index === 0 && (
+                                            <TableCell rowSpan={row.lines.length} align="center" sx={{ verticalAlign: 'middle' }}>
+                                                <Chip label="Credit" color="warning" size="small" sx={{ fontWeight: 800 }} />
+                                            </TableCell>
+                                        )}
+                                        {index === 0 && (
+                                            <TableCell rowSpan={row.lines.length} align="center" sx={{ verticalAlign: 'middle' }}>
+                                                <Stack spacing={0.75} alignItems="stretch">
+                                                    <Button fullWidth size="small" startIcon={<Plus size={15} />} disabled={row.saving} onClick={() => updateRow(row.customer._id, (current) => ({ ...current, lines: [...current.lines, blankLine()] }))}>Add item</Button>
+                                                    <Button fullWidth variant="contained" size="small" startIcon={<Save size={15} />} disabled={row.saving} onClick={() => void completeSale(row)}>{row.saving ? 'Saving…' : 'Save sale'}</Button>
+                                                </Stack>
+                                            </TableCell>
+                                        )}
+                                    </TableRow>
+                                );
+                            })}
+                        </TableBody>
+                    ))}
+                </Table>
             </TableContainer>
         </CardContent>
         <Dialog open={customerOpen} onClose={() => setCustomerOpen(false)} fullWidth maxWidth="xs"><DialogTitle>Add Customer</DialogTitle><DialogContent><TextField autoFocus fullWidth label="Customer name" sx={{ mt: 1.5, mb: 1.5 }} value={customerName} onChange={(event) => setCustomerName(event.target.value)} /><TextField fullWidth label="Phone number" value={customerPhone} onChange={(event) => setCustomerPhone(event.target.value)} /></DialogContent><DialogActions><Button onClick={() => setCustomerOpen(false)}>Cancel</Button><Button variant="contained" onClick={() => void createCustomer()}>Add to grid</Button></DialogActions></Dialog>
