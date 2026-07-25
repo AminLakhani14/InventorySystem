@@ -19,14 +19,6 @@ export const getOrCreateVendor = async (name: string, req: AuthRequest, session?
     return vendor;
 };
 
-const getDayRange = (value?: string) => {
-    const [year, month, day] = String(value || new Date().toLocaleDateString('en-CA')).split('-').map(Number);
-    const start = new Date(year, (month || 1) - 1, day || 1);
-    const end = new Date(start);
-    end.setDate(end.getDate() + 1);
-    return { start, end };
-};
-
 export const listVendors = async (req: AuthRequest, res: Response) => {
     try {
         const vendors = await Vendor.find(buildTenantFilter(req.user!)).sort({ name: 1 }).lean();
@@ -47,28 +39,28 @@ export const createVendor = async (req: AuthRequest, res: Response) => {
 
 export const getTodayVendorAvailability = async (req: AuthRequest, res: Response) => {
     try {
-        const { start, end } = getDayRange(typeof req.query.date === 'string' ? req.query.date : undefined);
         const tenant = buildTenantFilter(req.user!);
-        const orders = await PurchaseOrder.find({ ...tenant, createdAt: { $gte: start, $lt: end } }).lean();
-        const vendorIds = orders.map((order) => order.vendorId).filter(Boolean) as mongoose.Types.ObjectId[];
-        const stocks = await VendorStock.find({ ...tenant, vendorId: { $in: vendorIds } }).lean();
-        const stockByKey = new Map(stocks.map((stock) => [`${stock.vendorId.toString()}:${stock.productId}`, stock]));
+        const stocks = await VendorStock.find({ ...tenant, availableQuantity: { $gt: 0 } })
+            .sort({ productName: 1 })
+            .lean();
+        const vendorIds = [...new Set(stocks.map((stock) => stock.vendorId.toString()))];
+        const vendors = await Vendor.find({ ...tenant, _id: { $in: vendorIds } })
+            .select('name')
+            .lean();
+        const vendorNames = new Map<string, string>(vendors.map((vendor) => [vendor._id.toString(), vendor.name]));
         const groups = new Map<string, { vendorId: string; vendorName: string; products: Array<{ productId: string; productName: string; availableQuantity: number }> }>();
 
-        orders.forEach((order) => {
-            if (!order.vendorId) return;
-            const vendorId = order.vendorId.toString();
-            const group = groups.get(vendorId) || { vendorId, vendorName: order.vendorName, products: [] };
-            order.items.forEach((item) => {
-                if (group.products.some((product) => product.productId === item.productId)) return;
-                const stock = stockByKey.get(`${vendorId}:${item.productId}`);
-                group.products.push({ productId: item.productId, productName: item.productName, availableQuantity: Number(stock?.availableQuantity || 0) });
-            });
+        stocks.forEach((stock) => {
+            const vendorId = stock.vendorId.toString();
+            const vendorName = vendorNames.get(vendorId);
+            if (!vendorName) return;
+            const group = groups.get(vendorId) || { vendorId, vendorName, products: [] };
+            group.products.push({ productId: stock.productId, productName: stock.productName, availableQuantity: Number(stock.availableQuantity) });
             groups.set(vendorId, group);
         });
         return res.json(Array.from(groups.values()).sort((a, b) => a.vendorName.localeCompare(b.vendorName)));
     } catch (error: any) {
-        return res.status(500).json({ message: error.message || 'Unable to load today\'s vendor stock' });
+        return res.status(500).json({ message: error.message || 'Unable to load available vendor stock' });
     }
 };
 

@@ -5,29 +5,19 @@ import Product from '../models/Product';
 import Transaction from '../models/Transaction';
 import Vendor from '../models/Vendor';
 import VendorStock from '../models/VendorStock';
-import PurchaseOrder from '../models/PurchaseOrder';
 import { buildTenantFilter, getTenantObjectId } from '../utils/tenancy';
 
 type QuickLine = { vendorId: string; productId: string; quantity: number; unitPrice: number };
-
-const getDayRange = (value?: string) => {
-    const [year, month, day] = String(value || new Date().toLocaleDateString('en-CA')).split('-').map(Number);
-    const start = new Date(year, (month || 1) - 1, day || 1);
-    const end = new Date(start);
-    end.setDate(end.getDate() + 1);
-    return { start, end };
-};
 
 export const createQuickSale = async (req: AuthRequest, res: Response) => {
     const session = await mongoose.startSession();
     try {
         session.startTransaction();
         const tenant = buildTenantFilter(req.user!);
-        const { start, end } = getDayRange(typeof req.body.saleDate === 'string' ? req.body.saleDate : undefined);
         const customerName = String(req.body.customerName || '').trim();
-        const paymentMethod = req.body.paymentMethod === 'credit' ? 'credit' : req.body.paymentMethod === 'cash' ? 'cash' : '';
+        // This grid is intentionally credit-only. Never accept a cash method from the client.
+        const paymentMethod = 'credit';
         if (!customerName) throw new Error('Customer is required');
-        if (!paymentMethod) throw new Error('Choose Cash or Credit');
         const lines = req.body.lines as QuickLine[];
         if (!Array.isArray(lines) || !lines.length) throw new Error('Add at least one vendor product');
         const combined = new Map<string, QuickLine>();
@@ -40,19 +30,18 @@ export const createQuickSale = async (req: AuthRequest, res: Response) => {
         });
         const checkedLines: Array<QuickLine & { productName: string; vendorName: string; unitCost: number }> = [];
         for (const line of combined.values()) {
-            const [product, vendor, vendorStock, todayDelivery] = await Promise.all([
+            const [product, vendor, vendorStock] = await Promise.all([
                 Product.findOne({ id: line.productId, ...tenant }).session(session),
                 Vendor.findOne({ _id: line.vendorId, ...tenant }).session(session),
                 VendorStock.findOne({ vendorId: line.vendorId, productId: line.productId, ...tenant }).session(session),
-                PurchaseOrder.findOne({ vendorId: line.vendorId, 'items.productId': line.productId, ...tenant, createdAt: { $gte: start, $lt: end } }).session(session),
             ]);
-            if (!product || !vendor || !vendorStock || !todayDelivery) throw new Error('Selected vendor product was not delivered today');
+            if (!product || !vendor || !vendorStock) throw new Error('Selected vendor product is unavailable');
             if (product.stock < line.quantity || vendorStock.availableQuantity < line.quantity) throw new Error(`Insufficient stock for ${product.name}`);
             checkedLines.push({ ...line, productName: product.name, vendorName: vendor.name, unitCost: Number(product.purchasePrice || 0) });
         }
         const total = checkedLines.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0);
-        const paidNow = Math.min(Math.max(Number(req.body.paidNow || 0), 0), total);
-        const dueAmount = paymentMethod === 'credit' ? Math.max(total - paidNow, 0) : 0;
+        const paidNow = 0;
+        const dueAmount = total;
         const saleId = `QSO-${Math.random().toString(36).slice(2, 9).toUpperCase()}`;
         const transactions = checkedLines.map((line, index) => new Transaction({
             id: `${saleId}-L${index + 1}`, timestamp: new Date(), productId: line.productId, productName: line.productName,
