@@ -81,10 +81,8 @@ const QuickSalesGrid: React.FC = () => {
     const load = React.useCallback(async () => {
         setLoading(true); setError('');
         try {
-            const [customerResponse, productResponse, vendorResponse] = await Promise.all([
-                api.get<Customer[]>('/customers'), api.get<Product[]>('/products'), api.get<AvailableVendor[]>('/vendors/available-stock'),
             const [customerResponse, vendorListResponse, vendorResponse] = await Promise.all([
-                api.get<Customer[]>('/customers'), api.get<VendorOption[]>('/vendors'), api.get<AvailableVendor[]>('/vendors/today-availability'),
+                api.get<Customer[]>('/customers'), api.get<VendorOption[]>('/vendors'), api.get<AvailableVendor[]>('/vendors/available-stock'),
             ]);
             const activeCustomers = customerResponse.data.filter((customer) => customer.status === 'active');
             setCustomers(activeCustomers); setAllVendors(vendorListResponse.data); setVendors(vendorResponse.data);
@@ -106,7 +104,7 @@ const QuickSalesGrid: React.FC = () => {
     // Only vendor stock moves when a sale is saved, so the post-save refresh skips
     // the customer and vendor lists instead of reloading the whole grid.
     const loadAvailability = React.useCallback(async () => {
-        const response = await api.get<AvailableVendor[]>('/vendors/today-availability');
+        const response = await api.get<AvailableVendor[]>('/vendors/available-stock');
         setVendors(response.data);
     }, []);
 
@@ -254,7 +252,16 @@ const QuickSalesGrid: React.FC = () => {
                             <TableCell align="center" sx={{ width: 145 }}>Actions</TableCell>
                         </TableRow>
                     </TableHead>
-                    {rows.map((row) => (
+                    {!visibleRows.length && (
+                        <TableBody>
+                            <TableRow>
+                                <TableCell colSpan={10} align="center" sx={{ py: 3, color: 'text.secondary' }}>
+                                    {customerSearch.trim() ? `No customer matches “${customerSearch.trim()}”.` : 'No active customers yet.'}
+                                </TableCell>
+                            </TableRow>
+                        </TableBody>
+                    )}
+                    {visibleRows.map((row) => (
                         <TableBody key={row.customer._id}>
                             {row.lines.map((line, index) => {
                                 const productsForVendor = vendorFor(line.vendorId)?.products || [];
@@ -272,7 +279,7 @@ const QuickSalesGrid: React.FC = () => {
                                         <TableCell>
                                             <TextField select fullWidth size="small" disabled={row.saving} value={line.vendorId} onChange={(event) => selectVendor(row.customer._id, line.id, event.target.value)}>
                                                 <MenuItem value="">Select vendor</MenuItem>
-                                                {vendors.map((vendor) => <MenuItem key={vendor.vendorId} value={vendor.vendorId}>{vendor.vendorName} ({vendor.products.reduce((sum, product) => sum + product.availableQuantity, 0)} remaining)</MenuItem>)}
+                                                {vendors.map((vendor) => <MenuItem key={vendor.vendorId} value={vendor.vendorId}>{vendor.vendorName}{vendor.vendorPhone ? ` · ${vendor.vendorPhone}` : ''} ({vendor.products.reduce((sum, product) => sum + product.availableQuantity, 0)} remaining)</MenuItem>)}
                                             </TextField>
                                         </TableCell>
                                         <TableCell>
