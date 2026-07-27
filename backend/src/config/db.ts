@@ -5,8 +5,12 @@ dotenv.config();
 
 import dns from 'dns';
 
-// Explicitly use Google DNS to bypass local Windows DNS resolution issues with SRV records
-dns.setServers(['8.8.8.8', '8.8.4.4']);
+// Explicitly use Google DNS to bypass local Windows DNS resolution issues with SRV records.
+// Hosted environments already resolve SRV fine, and forcing an external resolver there only
+// adds latency to the connection handshake.
+if (process.env.NODE_ENV !== 'production') {
+    dns.setServers(['8.8.8.8', '8.8.4.4']);
+}
 
 const connectDB = async () => {
     try {
@@ -16,7 +20,12 @@ const connectDB = async () => {
             throw new Error('Please configure your MONGODB_URI in the .env file with a valid password.');
         }
 
-        const conn = await mongoose.connect(mongoURI);
+        const conn = await mongoose.connect(mongoURI, {
+            maxPoolSize: 20,
+            minPoolSize: 2,
+            serverSelectionTimeoutMS: 10000,
+            socketTimeoutMS: 45000,
+        });
 
         console.log(`📦 MongoDB Connected: ${conn.connection.host}`);
     } catch (err: any) {

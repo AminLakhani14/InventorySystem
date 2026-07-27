@@ -41,6 +41,7 @@ interface PurchaseOrder {
     _id: string;
     orderNumber: string;
     vendorName: string;
+    vendorPhone?: string;
     vehicleNumber: string;
     vehicleRent: number;
     labourCost: number;
@@ -58,6 +59,7 @@ interface DraftItem {
 
 interface StoredPurchaseOrderDraft {
     vendorName: string;
+    vendorPhone: string;
     vehicleNumber: string;
     vehicleRent: string;
     labourCost: string;
@@ -88,6 +90,7 @@ const PurchaseOrdersPage: React.FC = () => {
     const [products, setProducts] = React.useState<Product[]>([]);
     const [orders, setOrders] = React.useState<PurchaseOrder[]>([]);
     const [vendorName, setVendorName] = React.useState(storedDraft?.vendorName || '');
+    const [vendorPhone, setVendorPhone] = React.useState(storedDraft?.vendorPhone || '');
     const [vehicleNumber, setVehicleNumber] = React.useState(storedDraft?.vehicleNumber || '');
     const [vehicleRent, setVehicleRent] = React.useState(storedDraft?.vehicleRent || '');
     const [labourCost, setLabourCost] = React.useState(storedDraft?.labourCost || '');
@@ -136,6 +139,7 @@ const PurchaseOrdersPage: React.FC = () => {
 
         const draft: StoredPurchaseOrderDraft = {
             vendorName,
+            vendorPhone,
             vehicleNumber,
             vehicleRent,
             labourCost,
@@ -147,11 +151,12 @@ const PurchaseOrdersPage: React.FC = () => {
             editingId,
         };
         localStorage.setItem(draftKey, JSON.stringify(draft));
-    }, [draftKey, editingId, items, labourCost, paymentStatus, vehicleNumber, vehicleRent, vendorName]);
+    }, [draftKey, editingId, items, labourCost, paymentStatus, vehicleNumber, vehicleRent, vendorName, vendorPhone]);
 
     const resetForm = () => {
         localStorage.removeItem(draftKey);
         setVendorName('');
+        setVendorPhone('');
         setVehicleNumber('');
         setVehicleRent('');
         setLabourCost('');
@@ -172,6 +177,7 @@ const PurchaseOrdersPage: React.FC = () => {
         return orders.filter((order) => [
             order.orderNumber,
             order.vendorName,
+            order.vendorPhone,
             order.vehicleNumber,
             order.paymentStatus,
             ...order.items.map((item) => item.productName),
@@ -179,8 +185,8 @@ const PurchaseOrdersPage: React.FC = () => {
     }, [orders, searchQuery]);
 
     const handleSave = async () => {
-        if (!vendorName.trim() || !vehicleNumber.trim()) {
-            setError('Vendor name and Gadi Number are required.');
+        if (!vendorName.trim()) {
+            setError('Vendor name is required.');
             return;
         }
         if (items.some((item) => !item.product || toNumber(item.quantity) <= 0)) {
@@ -192,6 +198,7 @@ const PurchaseOrdersPage: React.FC = () => {
         setError('');
         const payload = {
             vendorName: vendorName.trim(),
+            vendorPhone: vendorPhone.trim(),
             vehicleNumber: vehicleNumber.trim(),
             vehicleRent: toNumber(vehicleRent),
             labourCost: toNumber(labourCost),
@@ -217,6 +224,7 @@ const PurchaseOrdersPage: React.FC = () => {
 
     const startEdit = (order: PurchaseOrder) => {
         setVendorName(order.vendorName);
+        setVendorPhone(order.vendorPhone || '');
         setVehicleNumber(order.vehicleNumber);
         setVehicleRent(String(order.vehicleRent));
         setLabourCost(String(order.labourCost || 0));
@@ -260,10 +268,11 @@ const PurchaseOrdersPage: React.FC = () => {
                     </Stack>
                     <Grid container spacing={2}>
                         <Grid size={{ xs: 12, md: 3 }}><TextField fullWidth required label="Vendor Name" value={vendorName} onChange={(event) => setVendorName(event.target.value)} /></Grid>
-                        <Grid size={{ xs: 12, md: 3 }}><TextField fullWidth required label="Gadi Number" value={vehicleNumber} onChange={(event) => setVehicleNumber(event.target.value)} /></Grid>
+                        <Grid size={{ xs: 12, md: 2 }}><TextField fullWidth label="Vendor Phone" value={vendorPhone} onChange={(event) => setVendorPhone(event.target.value)} /></Grid>
+                        <Grid size={{ xs: 12, md: 2 }}><TextField fullWidth label="Gadi Number" value={vehicleNumber} onChange={(event) => setVehicleNumber(event.target.value)} /></Grid>
                         <Grid size={{ xs: 12, md: 2 }}><TextField fullWidth label="Gadi Rent" type="number" slotProps={{ htmlInput: { min: 0, step: 'any' } }} value={vehicleRent} onChange={(event) => setVehicleRent(event.target.value)} /></Grid>
-                        <Grid size={{ xs: 12, md: 2 }}><TextField fullWidth label="Labour Cost" type="number" slotProps={{ htmlInput: { min: 0, step: 'any' } }} value={labourCost} onChange={(event) => setLabourCost(event.target.value)} /></Grid>
-                        <Grid size={{ xs: 12, md: 2 }}><TextField select fullWidth label="Payment Status" value={paymentStatus} onChange={(event) => setPaymentStatus(event.target.value as 'paid' | 'unpaid')}><MenuItem value="paid">Paid</MenuItem><MenuItem value="unpaid">Unpaid</MenuItem></TextField></Grid>
+                        <Grid size={{ xs: 6, md: 1.5 }}><TextField fullWidth label="Labour Cost" type="number" slotProps={{ htmlInput: { min: 0, step: 'any' } }} value={labourCost} onChange={(event) => setLabourCost(event.target.value)} /></Grid>
+                        <Grid size={{ xs: 6, md: 1.5 }}><TextField select fullWidth label="Payment Status" value={paymentStatus} onChange={(event) => setPaymentStatus(event.target.value as 'paid' | 'unpaid')}><MenuItem value="paid">Paid</MenuItem><MenuItem value="unpaid">Unpaid</MenuItem></TextField></Grid>
                     </Grid>
 
                     <Divider sx={{ my: 3 }} />
@@ -307,7 +316,7 @@ const PurchaseOrdersPage: React.FC = () => {
                     <Table size="small" sx={{ minWidth: 1000 }}>
                         <TableHead><TableRow sx={{ bgcolor: 'action.hover' }}><TableCell>Order / Vendor</TableCell><TableCell>Products</TableCell><TableCell>Gadi Rent</TableCell><TableCell>Labour</TableCell><TableCell>Total Amount</TableCell><TableCell>Payment</TableCell><TableCell align="right">Action</TableCell></TableRow></TableHead>
                         <TableBody>{filteredOrders.map((order) => <TableRow key={order._id} hover>
-                            <TableCell><Typography fontWeight={800}>{order.vendorName}</Typography><Typography variant="caption" color="text.secondary">{order.orderNumber} · Gadi: {order.vehicleNumber}</Typography></TableCell>
+                            <TableCell><Typography fontWeight={800}>{order.vendorName}</Typography>{order.vendorPhone && <Typography variant="caption" color="text.secondary" display="block">{order.vendorPhone}</Typography>}<Typography variant="caption" color="text.secondary">{order.orderNumber} · Gadi: {order.vehicleNumber}</Typography></TableCell>
                             <TableCell><Typography variant="body2">{order.items.map((item) => `${item.productName} × ${item.quantity}`).join(', ')}</Typography><Typography variant="caption" color="text.secondary">{new Date(order.createdAt).toLocaleString()}</Typography></TableCell>
                             <TableCell>{formatCurrency(order.vehicleRent)}</TableCell>
                             <TableCell>{formatCurrency(order.labourCost || 0)}</TableCell>

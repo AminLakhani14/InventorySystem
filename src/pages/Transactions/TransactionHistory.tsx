@@ -61,6 +61,45 @@ import {
 } from 'date-fns';
 import useAppCurrency from '../../hooks/useAppCurrency';
 import { getRegionalIdLabel } from '../../lib/regional';
+import { buildSaleItemsSummary, buildVendorLabel, getSaleGroupId } from '../../lib/saleGrouping';
+
+/** One customer sale: its product lines merged into a single ledger entry. */
+interface SaleEntry extends Transaction {
+    lines: Transaction[];
+    vendorLabel: string;
+}
+
+// A sale saved with several products writes one transaction per product. They belong to the
+// same entry here; a sale split across two vendors keeps its own id per vendor and so stays
+// two entries.
+const groupTransactionsIntoSales = (transactions: Transaction[]): SaleEntry[] => {
+    const grouped = new Map<string, SaleEntry>();
+
+    transactions.forEach((tx) => {
+        const groupId = getSaleGroupId(tx.id);
+        const existing = grouped.get(groupId);
+
+        if (!existing) {
+            grouped.set(groupId, { ...tx, id: groupId, lines: [tx], vendorLabel: buildVendorLabel([tx.vendorName]) });
+            return;
+        }
+
+        existing.lines.push(tx);
+        existing.amount += Number(tx.amount || 0);
+        existing.totalPrice = Number(existing.totalPrice || 0) + Number(tx.totalPrice || 0);
+        existing.paidNow = Number(existing.paidNow || 0) + Number(tx.paidNow || 0);
+        existing.dueAmount = Number(existing.dueAmount || 0) + Number(tx.dueAmount || 0);
+        existing.grossProfit = Number(existing.grossProfit || 0) + Number(tx.grossProfit || 0);
+        existing.vendorLabel = buildVendorLabel(existing.lines.map((line) => line.vendorName));
+    });
+
+    return Array.from(grouped.values()).map((entry) => entry.lines.length === 1 ? entry : {
+        ...entry,
+        productName: buildSaleItemsSummary(entry.lines.map((line) => ({ productName: line.productName, quantity: Number(line.amount || 0) }))),
+        // A merged entry has no single unit price; the dialog itemises the lines instead.
+        unitPrice: undefined,
+    });
+};
 
 const TransactionHistory: React.FC = () => {
     const theme = useTheme();
@@ -70,7 +109,7 @@ const TransactionHistory: React.FC = () => {
     const { formatCurrency } = useAppCurrency();
     const regionalIdLabel = getRegionalIdLabel(country);
     const [searchTerm, setSearchTerm] = useState('');
-    const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
+    const [selectedTx, setSelectedTx] = useState<SaleEntry | null>(null);
     const [datePickerAnchorEl, setDatePickerAnchorEl] = useState<HTMLElement | null>(null);
     const [fromDate, setFromDate] = useState('');
     const [toDate, setToDate] = useState('');
@@ -128,17 +167,29 @@ const TransactionHistory: React.FC = () => {
     const currentYear = new Date().getFullYear();
     const yearOptions = useMemo(() => Array.from({ length: 16 }, (_, i) => currentYear - 10 + i), [currentYear]);
 
-    const filteredTransactions = (transactions || []).filter(t =>
-        (
-            t.productName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            t.userName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            t.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            (t.customerName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-            (t.customerCnic || '').toLowerCase().includes(searchTerm.toLowerCase())
-        ) &&
-        (!fromDate || new Date(t.timestamp) >= new Date(`${fromDate}T00:00:00`)) &&
-        (!toDate || new Date(t.timestamp) <= new Date(`${toDate}T23:59:59.999`))
-    );
+    const saleEntries = useMemo(() => groupTransactionsIntoSales(transactions || []), [transactions]);
+
+    const filteredTransactions = useMemo(() => {
+        const term = searchTerm.toLowerCase();
+        // Search runs across every line of an entry so a product only on the second line
+        // still finds its sale.
+        return saleEntries.filter(entry =>
+            (
+                !term ||
+                entry.id.toLowerCase().includes(term) ||
+                entry.userName.toLowerCase().includes(term) ||
+                (entry.customerName || '').toLowerCase().includes(term) ||
+                (entry.customerCnic || '').toLowerCase().includes(term) ||
+                entry.lines.some(line =>
+                    line.id.toLowerCase().includes(term) ||
+                    line.productName.toLowerCase().includes(term) ||
+                    (line.vendorName || '').toLowerCase().includes(term)
+                )
+            ) &&
+            (!fromDate || new Date(entry.timestamp) >= new Date(`${fromDate}T00:00:00`)) &&
+            (!toDate || new Date(entry.timestamp) <= new Date(`${toDate}T23:59:59.999`))
+        );
+    }, [saleEntries, searchTerm, fromDate, toDate]);
 
     const handlePrint = () => {
         window.print();
@@ -146,11 +197,14 @@ const TransactionHistory: React.FC = () => {
 
     const exportToCSV = () => {
         setExportingCsv(true);
-        const headers = ['TX ID', 'Timestamp', 'Product', 'User', 'Customer', regionalIdLabel, 'Payment Method', 'Paid Now', 'Remaining Due', 'Type', 'Quantity', 'Unit Price', 'Value', 'Profit/Loss'];
+        const headers = ['TX ID', 'Timestamp', 'Product', 'Vendor', 'User', 'Customer', regionalIdLabel, 'Payment Method', 'Paid Now', 'Remaining Due', 'Type', 'Quantity', 'Unit Price', 'Value', 'Profit/Loss'];
         const rows = filteredTransactions.map(t => [
             t.id,
             t.timestamp,
-            t.productName,
+            t.lines.length > 1
+                ? buildSaleItemsSummary(t.lines.map(line => ({ productName: line.productName, quantity: Number(line.amount || 0) })), t.lines.length)
+                : t.productName,
+            t.vendorLabel,
             t.userName,
             t.customerName || '',
             t.customerCnic || '',
@@ -290,9 +344,14 @@ const TransactionHistory: React.FC = () => {
                                                     {tx.productName}
                                                 </Typography>
                                                 <Typography variant="caption" color="text.secondary">
-                                                    {tx.unitPrice != null
-                                                        ? `Unit: ${formatCurrency(tx.unitPrice, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
-                                                        : 'Unit price unavailable'}
+                                                    {[
+                                                        tx.lines.length > 1
+                                                            ? `${tx.lines.length} products`
+                                                            : tx.unitPrice != null
+                                                                ? `Unit: ${formatCurrency(tx.unitPrice, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
+                                                                : 'Unit price unavailable',
+                                                        tx.vendorLabel ? `from ${tx.vendorLabel}` : '',
+                                                    ].filter(Boolean).join(' · ')}
                                                 </Typography>
                                             </TableCell>
                                             <TableCell>
@@ -550,10 +609,33 @@ const TransactionHistory: React.FC = () => {
                                     <Typography fontWeight={700}>Transaction ID:</Typography>
                                     <Typography color="primary.main" fontWeight={700}>#{selectedTx.id}</Typography>
                                 </Box>
-                                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                                    <Typography fontWeight={700}>Product:</Typography>
-                                    <Typography>{selectedTx.productName}</Typography>
-                                </Box>
+                                {selectedTx.lines.length > 1 ? (
+                                    <Box sx={{ mb: 1.5 }}>
+                                        <Typography fontWeight={700} sx={{ mb: 0.5 }}>Products:</Typography>
+                                        {selectedTx.lines.map((line) => (
+                                            <Box key={line.id} sx={{ display: 'flex', justifyContent: 'space-between', pl: 1 }}>
+                                                <Typography variant="body2">
+                                                    {line.amount} × {line.productName}
+                                                    {line.unitPrice != null ? ` @ ${formatCurrency(line.unitPrice, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}` : ''}
+                                                </Typography>
+                                                <Typography variant="body2" fontWeight={700}>
+                                                    {formatCurrency(line.totalPrice || 0, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                                                </Typography>
+                                            </Box>
+                                        ))}
+                                    </Box>
+                                ) : (
+                                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                                        <Typography fontWeight={700}>Product:</Typography>
+                                        <Typography>{selectedTx.productName}</Typography>
+                                    </Box>
+                                )}
+                                {selectedTx.vendorLabel && (
+                                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                                        <Typography fontWeight={700}>Vendor:</Typography>
+                                        <Typography>{selectedTx.vendorLabel}</Typography>
+                                    </Box>
+                                )}
                                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                                     <Typography fontWeight={700}>Type:</Typography>
                                     <Typography sx={{ textTransform: 'capitalize' }}>{selectedTx.type}</Typography>
@@ -584,10 +666,12 @@ const TransactionHistory: React.FC = () => {
                                         {formatCurrency(selectedTx.dueAmount || 0, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                                     </Typography>
                                 </Box>
-                                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                                    <Typography fontWeight={700}>Unit Price:</Typography>
-                                    <Typography>{formatCurrency((selectedTx.unitPrice ?? (selectedTx.totalPrice / selectedTx.amount)), { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</Typography>
-                                </Box>
+                                {selectedTx.lines.length === 1 && (
+                                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                                        <Typography fontWeight={700}>Unit Price:</Typography>
+                                        <Typography>{formatCurrency((selectedTx.unitPrice ?? (selectedTx.totalPrice / selectedTx.amount)), { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</Typography>
+                                    </Box>
+                                )}
                                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
                                     <Typography fontWeight={700}>Profit / Loss:</Typography>
                                     <Typography color={(selectedTx.grossProfit || 0) >= 0 ? 'success.main' : 'error.main'}>

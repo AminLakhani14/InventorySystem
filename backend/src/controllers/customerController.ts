@@ -60,7 +60,7 @@ export const getCustomers = async (req: AuthRequest, res: Response) => {
     try {
         const customers = await Customer.find(buildTenantFilter(req.user!)).sort({
             updatedAt: -1,
-        });
+        }).lean();
         return res.json(customers);
     } catch (error: unknown) {
         return res.status(500).json({ message: getErrorMessage(error, 'Failed to fetch customers') });

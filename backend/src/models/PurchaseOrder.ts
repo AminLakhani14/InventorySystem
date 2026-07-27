@@ -10,6 +10,7 @@ export interface IPurchaseOrder extends Document {
     orderNumber: string;
     vendorId?: mongoose.Types.ObjectId;
     vendorName: string;
+    vendorPhone?: string;
     vehicleNumber: string;
     vehicleRent: number;
     labourCost: number;
@@ -35,7 +36,8 @@ const PurchaseOrderSchema = new Schema<IPurchaseOrder>(
         orderNumber: { type: String, required: true, index: true },
         vendorId: { type: Schema.Types.ObjectId, ref: 'Vendor', default: null, index: true },
         vendorName: { type: String, required: true, trim: true },
-        vehicleNumber: { type: String, required: true, trim: true },
+        vendorPhone: { type: String, default: '', trim: true },
+        vehicleNumber: { type: String, default: '', trim: true },
         vehicleRent: { type: Number, required: true, min: 0 },
         labourCost: { type: Number, required: true, min: 0, default: 0 },
         paymentStatus: { type: String, enum: ['paid', 'unpaid'], required: true, default: 'unpaid' },
@@ -49,5 +51,7 @@ const PurchaseOrderSchema = new Schema<IPurchaseOrder>(
 );
 
 PurchaseOrderSchema.index({ businessId: 1, orderNumber: 1 }, { unique: true });
+PurchaseOrderSchema.index({ businessId: 1, createdAt: -1 });
+PurchaseOrderSchema.index({ businessId: 1, vendorId: 1 });
 
 export default mongoose.model<IPurchaseOrder>('PurchaseOrder', PurchaseOrderSchema);

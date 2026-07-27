@@ -56,5 +56,8 @@ const TransactionSchema: Schema = new Schema({
 }, { timestamps: true });
 
 TransactionSchema.index({ businessId: 1, id: 1 }, { unique: true });
+// Every list/report read is "this tenant, newest first" — without this the sort is done in memory.
+TransactionSchema.index({ businessId: 1, timestamp: -1 });
+TransactionSchema.index({ businessId: 1, type: 1, timestamp: -1 });
 
 export default mongoose.model<ITransaction>('Transaction', TransactionSchema);

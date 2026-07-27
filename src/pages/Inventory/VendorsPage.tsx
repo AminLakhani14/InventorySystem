@@ -46,6 +46,7 @@ interface PurchaseOrder {
     vendorId?: string;
     orderNumber: string;
     vendorName: string;
+    vendorPhone?: string;
     vehicleNumber: string;
     vehicleRent: number;
     labourCost: number;
@@ -66,6 +67,7 @@ interface VendorSummary {
     key: string;
     id?: string;
     name: string;
+    phone: string;
     orders: PurchaseOrder[];
     products: ProductSummary[];
     totalVehicleRent: number;
@@ -94,6 +96,7 @@ const buildVendorSummaries = (orders: PurchaseOrder[]): VendorSummary[] => {
                 key,
                 id: order.vendorId,
                 name: order.vendorName.trim().replace(/\s+/g, ' '),
+                phone: order.vendorPhone || '',
                 orders: [],
                 products: [],
                 totalVehicleRent: 0,
@@ -114,6 +117,8 @@ const buildVendorSummaries = (orders: PurchaseOrder[]): VendorSummary[] => {
             vendor.name = order.vendorName.trim().replace(/\s+/g, ' ');
             vendor.id = order.vendorId || vendor.id;
         }
+        // Older orders predate the phone field, so keep the most recent one that has it.
+        vendor.phone = vendor.phone || order.vendorPhone || '';
 
         order.items.forEach((item) => {
             const productKey = normalizeName(item.productName);
@@ -184,6 +189,7 @@ const VendorsPage: React.FC = () => {
         if (!query) return vendors;
         return vendors.filter((vendor) =>
             vendor.name.toLocaleLowerCase().includes(query)
+            || vendor.phone.toLocaleLowerCase().includes(query)
             || vendor.products.some((product) => product.name.toLocaleLowerCase().includes(query))
             || vendor.orders.some((order) => order.orderNumber.toLocaleLowerCase().includes(query))
         );
@@ -279,6 +285,7 @@ const VendorsPage: React.FC = () => {
                                 <TableRow key={vendor.key} hover>
                                     <TableCell>
                                         <Typography fontWeight={800}>{vendor.name}</Typography>
+                                        {vendor.phone && <Typography variant="caption" color="text.secondary" display="block">{vendor.phone}</Typography>}
                                         <Typography variant="caption" color="text.secondary">{vendor.products.length} unique vegetable{vendor.products.length === 1 ? '' : 's'}</Typography>
                                     </TableCell>
                                     <TableCell sx={{ maxWidth: 360 }}>
@@ -308,7 +315,7 @@ const VendorsPage: React.FC = () => {
                     <>
                         <DialogTitle sx={{ pr: 7 }}>
                             <Typography variant="h5" fontWeight={900}>{selectedVendor.name}</Typography>
-                            <Typography variant="body2" color="text.secondary">Complete buying history</Typography>
+                            <Typography variant="body2" color="text.secondary">{selectedVendor.phone ? `${selectedVendor.phone} · ` : ''}Complete buying history</Typography>
                             <IconButton onClick={() => setSelectedVendor(null)} aria-label="Close vendor details" sx={{ position: 'absolute', right: 16, top: 16 }}><X size={20} /></IconButton>
                         </DialogTitle>
                         <DialogContent>

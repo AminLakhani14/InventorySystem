@@ -184,7 +184,7 @@ export const inventoryRequestDecisionSchema = Joi.object({
 
 export const purchaseOrderSchema = Joi.object({
     vendorName: Joi.string().trim().min(2).max(120).required(),
-    vehicleNumber: Joi.string().trim().min(2).max(60).required(),
+    vehicleNumber: Joi.string().trim().max(60).allow('').optional(),
     vehicleRent: Joi.number().min(0).required(),
     labourCost: Joi.number().min(0).required(),
     paymentStatus: Joi.string().valid('paid', 'unpaid').required(),

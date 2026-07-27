@@ -409,7 +409,7 @@ const fetchSourceSuggestions = async (
 
 export const getProducts = async (req: AuthRequest, res: Response) => {
     try {
-        const products = await Product.find(buildTenantFilter(req.user!)).sort({ name: 1 });
+        const products = await Product.find(buildTenantFilter(req.user!)).sort({ name: 1 }).lean();
         res.json(products);
     } catch (error: any) {
         res.status(500).json({ message: error.message });

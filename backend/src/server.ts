@@ -1,6 +1,7 @@
 import express, { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
+import compression from 'compression';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
 import path from 'path';
@@ -69,6 +70,8 @@ const corsOptions: cors.CorsOptions = {
 
 // ── Security & Parsing Middleware ────────────────────────────
 app.use(helmet());
+// gzip every JSON response — the list endpoints are the bulk of the payload weight.
+app.use(compression());
 app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));
 app.use(express.json());
@@ -124,7 +127,6 @@ app.use(errorHandler);
 const startServer = async () => {
     try {
         await connectDB();
-        await ensureTenantIndexes();
     } catch (error) {
         console.error('❌ Server database init failed:', error);
     }
@@ -134,6 +136,10 @@ const startServer = async () => {
         console.log(`🚀 ItemHive Server running on port ${PORT}`);
         console.log(`📋 Environment: ${process.env.NODE_ENV || 'development'}`);
     });
+
+    // Backfill + index maintenance scans whole collections, so it runs after the port is
+    // open instead of holding every request on a cold start behind it.
+    ensureTenantIndexes().catch((error) => console.error('❌ Tenant index maintenance failed:', error));
 };
 
 startServer();

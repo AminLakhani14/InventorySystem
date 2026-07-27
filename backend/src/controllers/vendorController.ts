@@ -10,11 +10,16 @@ import { buildTenantFilter, getTenantObjectId } from '../utils/tenancy';
 
 export const normalizeVendorName = (name: string) => name.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
 
-export const getOrCreateVendor = async (name: string, req: AuthRequest, session?: mongoose.ClientSession) => {
+export const getOrCreateVendor = async (name: string, req: AuthRequest, session?: mongoose.ClientSession, phoneNumber?: string) => {
     const cleanName = name.trim().replace(/\s+/g, ' ');
     if (!cleanName) throw new Error('Vendor name is required');
+    const cleanPhone = String(phoneNumber ?? '').trim();
     const query = { normalizedName: normalizeVendorName(cleanName), ...buildTenantFilter(req.user!) };
-    const update = { $setOnInsert: { name: cleanName, normalizedName: query.normalizedName, businessId: getTenantObjectId(req.user!) } };
+    // Only overwrite the saved phone when a new one is supplied, so blank inputs never wipe it.
+    const update = {
+        $setOnInsert: { name: cleanName, normalizedName: query.normalizedName, businessId: getTenantObjectId(req.user!) },
+        ...(cleanPhone ? { $set: { phoneNumber: cleanPhone } } : {}),
+    };
     const vendor = await Vendor.findOneAndUpdate(query, update, { new: true, upsert: true, session, setDefaultsOnInsert: true });
     return vendor;
 };
@@ -30,7 +35,7 @@ export const listVendors = async (req: AuthRequest, res: Response) => {
 
 export const createVendor = async (req: AuthRequest, res: Response) => {
     try {
-        const vendor = await getOrCreateVendor(String(req.body.name || ''), req);
+        const vendor = await getOrCreateVendor(String(req.body.name || ''), req, undefined, String(req.body.phoneNumber || ''));
         return res.status(201).json(vendor);
     } catch (error: any) {
         return res.status(400).json({ message: error.message || 'Unable to create vendor' });
@@ -45,16 +50,16 @@ export const getTodayVendorAvailability = async (req: AuthRequest, res: Response
             .lean();
         const vendorIds = [...new Set(stocks.map((stock) => stock.vendorId.toString()))];
         const vendors = await Vendor.find({ ...tenant, _id: { $in: vendorIds } })
-            .select('name')
+            .select('name phoneNumber')
             .lean();
-        const vendorNames = new Map<string, string>(vendors.map((vendor) => [vendor._id.toString(), vendor.name]));
-        const groups = new Map<string, { vendorId: string; vendorName: string; products: Array<{ productId: string; productName: string; availableQuantity: number }> }>();
+        const vendorsById = new Map(vendors.map((vendor) => [vendor._id.toString(), vendor]));
+        const groups = new Map<string, { vendorId: string; vendorName: string; vendorPhone: string; products: Array<{ productId: string; productName: string; availableQuantity: number }> }>();
 
         stocks.forEach((stock) => {
             const vendorId = stock.vendorId.toString();
-            const vendorName = vendorNames.get(vendorId);
-            if (!vendorName) return;
-            const group = groups.get(vendorId) || { vendorId, vendorName, products: [] };
+            const vendor = vendorsById.get(vendorId);
+            if (!vendor) return;
+            const group = groups.get(vendorId) || { vendorId, vendorName: vendor.name, vendorPhone: vendor.phoneNumber || '', products: [] };
             group.products.push({ productId: stock.productId, productName: stock.productName, availableQuantity: Number(stock.availableQuantity) });
             groups.set(vendorId, group);
         });
@@ -64,39 +69,71 @@ export const getTodayVendorAvailability = async (req: AuthRequest, res: Response
     }
 };
 
+// Accepts either a single { productId, quantity } or a multi-line { items: [...] } body.
+const readReceiveLines = (body: { productId?: string; quantity?: unknown; items?: Array<{ productId?: string; quantity?: unknown }> }) => {
+    const raw = Array.isArray(body.items) && body.items.length
+        ? body.items
+        : [{ productId: body.productId, quantity: body.quantity }];
+    const merged = new Map<string, number>();
+    raw.forEach((line) => {
+        const productId = String(line.productId || '');
+        const quantity = Number(line.quantity);
+        if (!productId) throw new Error('Select a vegetable for every line');
+        if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Quantity must be greater than zero');
+        merged.set(productId, (merged.get(productId) || 0) + quantity);
+    });
+    if (!merged.size) throw new Error('Add at least one vegetable');
+    return Array.from(merged.entries()).map(([productId, quantity]) => ({ productId, quantity }));
+};
+
 export const receiveVendorStock = async (req: AuthRequest, res: Response) => {
+    const tenant = buildTenantFilter(req.user!);
+    let lines: Array<{ productId: string; quantity: number }>;
+    try {
+        lines = readReceiveLines(req.body || {});
+    } catch (error: any) {
+        return res.status(400).json({ message: error.message || 'Unable to receive vendor stock' });
+    }
+
     const session = await mongoose.startSession();
     try {
-        session.startTransaction();
-        const vendor = await Vendor.findOne({ _id: req.params.id, ...buildTenantFilter(req.user!) }).session(session);
-        if (!vendor) throw new Error('Vendor not found');
-        const product = await Product.findOne({ id: req.body.productId, ...buildTenantFilter(req.user!) }).session(session);
-        if (!product) throw new Error('Product not found');
-        const quantity = Number(req.body.quantity);
-        if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Quantity must be greater than zero');
-        product.stock += quantity;
-        await product.save({ session });
-        await VendorStock.findOneAndUpdate(
-            { vendorId: vendor._id, productId: product.id, ...buildTenantFilter(req.user!) },
-            { $inc: { availableQuantity: quantity }, $set: { productName: product.name }, $setOnInsert: { businessId: getTenantObjectId(req.user!) } },
-            { new: true, upsert: true, session, setDefaultsOnInsert: true },
-        );
-        const order = new PurchaseOrder({
-            orderNumber: `PO-${Date.now()}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`,
-            vendorId: vendor._id,
-            vendorName: vendor.name,
-            vehicleNumber: 'Quick Grid', vehicleRent: 0, labourCost: 0, paymentStatus: 'unpaid',
-            items: [{ productId: product.id, productName: product.name, quantity }],
-            grandTotal: 0,
-            receivedBy: req.user!.id, receivedByName: req.user!.name, businessId: getTenantObjectId(req.user!),
+        let saved: unknown = null;
+        // Sequential awaits only: parallel commands on one session break the transaction.
+        await session.withTransaction(async () => {
+            const vendor = await Vendor.findOne({ _id: req.params.id, ...tenant }).session(session);
+            if (!vendor) throw new Error('Vendor not found');
+
+            const items: Array<{ productId: string; productName: string; quantity: number }> = [];
+            for (const line of lines) {
+                const product = await Product.findOne({ id: line.productId, ...tenant }).session(session);
+                if (!product) throw new Error('Product not found');
+                product.stock += line.quantity;
+                await product.save({ session });
+                await VendorStock.findOneAndUpdate(
+                    { vendorId: vendor._id, productId: product.id, ...tenant },
+                    { $inc: { availableQuantity: line.quantity }, $set: { productName: product.name }, $setOnInsert: { businessId: getTenantObjectId(req.user!) } },
+                    { new: true, upsert: true, session, setDefaultsOnInsert: true },
+                );
+                items.push({ productId: product.id, productName: product.name, quantity: line.quantity });
+            }
+
+            const order = new PurchaseOrder({
+                orderNumber: `PO-${Date.now()}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`,
+                vendorId: vendor._id,
+                vendorName: vendor.name,
+                vendorPhone: vendor.phoneNumber || '',
+                vehicleNumber: 'Quick Grid', vehicleRent: 0, labourCost: 0, paymentStatus: 'unpaid',
+                items,
+                grandTotal: 0,
+                receivedBy: req.user!.id, receivedByName: req.user!.name, businessId: getTenantObjectId(req.user!),
+            });
+            await order.save({ session });
+            saved = order;
         });
-        await order.save({ session });
-        await session.commitTransaction();
-        return res.status(201).json(order);
+        return res.status(201).json(saved);
     } catch (error: any) {
-        await session.abortTransaction();
         return res.status(400).json({ message: error.message || 'Unable to receive vendor stock' });
-    } finally { session.endSession(); }
+    } finally { await session.endSession(); }
 };
 
 export const assignOpeningVendorStock = async (req: AuthRequest, res: Response) => {

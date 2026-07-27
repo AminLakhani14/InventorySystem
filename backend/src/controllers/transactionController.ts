@@ -8,7 +8,10 @@ import { buildTenantFilter, getTenantObjectId } from '../utils/tenancy';
 
 export const getTransactions = async (req: AuthRequest, res: Response) => {
     try {
-        const transactions = await Transaction.find(buildTenantFilter(req.user!)).sort({ timestamp: -1 });
+        // lean() skips hydrating thousands of mongoose documents the client only reads as JSON.
+        const limit = Math.min(Math.max(Number(req.query.limit) || 0, 0), 5000);
+        const query = Transaction.find(buildTenantFilter(req.user!)).sort({ timestamp: -1 }).lean();
+        const transactions = await (limit ? query.limit(limit) : query);
         res.json(transactions);
     } catch (error: any) {
         res.status(500).json({ message: error.message });

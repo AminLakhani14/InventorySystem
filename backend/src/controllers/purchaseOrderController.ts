@@ -61,7 +61,7 @@ const applyVendorStockChanges = async (vendorId: mongoose.Types.ObjectId, items:
 
 export const getPurchaseOrders = async (req: AuthRequest, res: Response) => {
     try {
-        const orders = await PurchaseOrder.find(buildTenantFilter(req.user!)).sort({ createdAt: -1 });
+        const orders = await PurchaseOrder.find(buildTenantFilter(req.user!)).sort({ createdAt: -1 }).lean();
         return res.json(orders);
     } catch (error: any) {
         return res.status(500).json({ message: error.message || 'Failed to fetch purchase orders' });
@@ -74,7 +74,8 @@ export const createPurchaseOrder = async (req: AuthRequest, res: Response) => {
     try {
         session.startTransaction();
         const tenantFilter = buildTenantFilter(req.user!);
-        const vendor = await getOrCreateVendor(req.body.vendorName, req, session);
+        const vendorPhone = String(req.body.vendorPhone || '').trim();
+        const vendor = await getOrCreateVendor(req.body.vendorName, req, session, vendorPhone);
         const receivedItems = await buildReceivedItems(req.body.items, tenantFilter, session);
         const vehicleRent = Number(req.body.vehicleRent);
         const labourCost = Number(req.body.labourCost);
@@ -83,7 +84,8 @@ export const createPurchaseOrder = async (req: AuthRequest, res: Response) => {
             orderNumber: buildOrderNumber(),
             vendorId: vendor._id,
             vendorName: req.body.vendorName,
-            vehicleNumber: req.body.vehicleNumber,
+            vendorPhone: vendorPhone || vendor.phoneNumber || '',
+            vehicleNumber: req.body.vehicleNumber || '',
             vehicleRent,
             labourCost,
             paymentStatus: req.body.paymentStatus,
@@ -116,7 +118,8 @@ export const updatePurchaseOrder = async (req: AuthRequest, res: Response) => {
         const order = await PurchaseOrder.findOne({ _id: req.params.id, ...tenantFilter }).session(session);
         if (!order) throw new Error('Purchase order not found');
 
-        const vendor = await getOrCreateVendor(req.body.vendorName, req, session);
+        const vendorPhone = String(req.body.vendorPhone || '').trim();
+        const vendor = await getOrCreateVendor(req.body.vendorName, req, session, vendorPhone);
 
         const receivedItems = await buildReceivedItems(req.body.items, tenantFilter, session);
         await applyStockChanges(order.items, -1, tenantFilter, session);
@@ -126,7 +129,8 @@ export const updatePurchaseOrder = async (req: AuthRequest, res: Response) => {
 
         order.vendorId = vendor._id;
         order.vendorName = req.body.vendorName;
-        order.vehicleNumber = req.body.vehicleNumber;
+        order.vendorPhone = vendorPhone || vendor.phoneNumber || '';
+        order.vehicleNumber = req.body.vehicleNumber || '';
         order.vehicleRent = Number(req.body.vehicleRent);
         order.labourCost = Number(req.body.labourCost);
         order.paymentStatus = req.body.paymentStatus;

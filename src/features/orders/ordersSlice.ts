@@ -7,6 +7,7 @@ export interface OrderLineItem {
     lineId: string;
     productId: string;
     productName: string;
+    vendorName?: string;
     quantity: number;
     rate: number;
     amount: number;

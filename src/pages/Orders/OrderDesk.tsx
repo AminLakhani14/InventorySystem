@@ -91,6 +91,11 @@ import {
   PRODUCT_UNITS,
 } from "../../lib/productUnits";
 import QuickSalesGrid from "./QuickSalesGrid";
+import {
+  buildSaleItemsSummary,
+  buildVendorLabel,
+  getSaleGroupId,
+} from "../../lib/saleGrouping";
 
 type CustomerType = "regular" | "credit" | "installment" | "wholesale";
 type CustomerStatus = "active" | "inactive";
@@ -233,11 +238,7 @@ const getLineProductLabel = (lineItems?: OrderLineItem[], fallback = "") => {
   return `${lineItems[0].productName} + ${lineItems.length - 1} more`;
 };
 
-const getTransactionOrderId = (transactionId: string) => {
-  if (!transactionId.startsWith("ORD-")) return transactionId;
-  const rawOrderId = transactionId.replace(/^ORD-/, "");
-  return rawOrderId.replace(/-L\d+$/, "");
-};
+const getTransactionOrderId = getSaleGroupId;
 
 const getApiErrorMessage = (error: unknown, fallback: string) => {
   const maybeError = error as {
@@ -1262,6 +1263,7 @@ const OrderDesk: React.FC = () => {
           lineId: tx.id,
           productId: tx.productId,
           productName: tx.productName,
+          vendorName: tx.vendorName,
           quantity: lineQuantity,
           rate: lineRate,
           amount: lineAmount,
@@ -1484,7 +1486,9 @@ const OrderDesk: React.FC = () => {
     const rows = filteredOrders.map((order) => [
       order.id,
       order.customerName || "",
-      getLineProductLabel(order.lineItems, order.productName),
+      order.lineItems?.length
+        ? buildSaleItemsSummary(order.lineItems, order.lineItems.length)
+        : order.productName,
       order.quantity.toString(),
       String(order.orderAmount || 0),
       String(order.paidNow || 0),
@@ -3148,19 +3152,34 @@ const OrderDesk: React.FC = () => {
                           </TableCell>
                           <TableCell>
                             <Typography variant="body2" fontWeight={600}>
-                              {getLineProductLabel(
-                                order.lineItems,
-                                order.productName,
-                              )}
+                              {order.lineItems?.length
+                                ? buildSaleItemsSummary(order.lineItems)
+                                : order.productName}
                             </Typography>
-                            {order.lineItems && order.lineItems.length > 1 && (
-                              <Typography
-                                variant="caption"
-                                color="text.secondary"
-                              >
-                                {order.lineItems.length} products in this order
-                              </Typography>
-                            )}
+                            {(() => {
+                              const vendorLabel = buildVendorLabel(
+                                (order.lineItems || []).map(
+                                  (line) => line.vendorName,
+                                ),
+                              );
+                              const productCount = order.lineItems?.length || 0;
+                              if (productCount < 2 && !vendorLabel) return null;
+                              return (
+                                <Typography
+                                  variant="caption"
+                                  color="text.secondary"
+                                >
+                                  {[
+                                    productCount > 1
+                                      ? `${productCount} products in this order`
+                                      : "",
+                                    vendorLabel ? `from ${vendorLabel}` : "",
+                                  ]
+                                    .filter(Boolean)
+                                    .join(" · ")}
+                                </Typography>
+                              );
+                            })()}
                           </TableCell>
                           <TableCell>
                             <Typography variant="body2" fontWeight={700}>
