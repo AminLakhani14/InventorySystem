@@ -27,6 +27,7 @@ import {
     ReceiptText,
     ClipboardCheck,
     Store,
+    Percent,
     ChevronLeft,
     ChevronRight
 } from 'lucide-react';
@@ -60,6 +61,7 @@ const Sidebar: React.FC<SidebarProps> = ({ mobileOpen, onDrawerToggle }) => {
         { text: 'Inventory', icon: <Package size={20} />, path: '/inventory', roles: ['super_admin', 'admin', 'user'] },
         { text: 'Purchase Orders', icon: <ClipboardCheck size={20} />, path: '/inventory/purchase-orders', roles: ['super_admin', 'admin'] },
         { text: 'Vendors', icon: <Store size={20} />, path: '/inventory/vendors', roles: ['super_admin', 'admin'] },
+        { text: 'Vendor Commission', icon: <Percent size={20} />, path: '/inventory/vendor-commission', roles: ['super_admin', 'admin'] },
         { text: 'Order Desk', icon: <ClipboardList size={20} />, path: '/orders', roles: ['super_admin', 'admin', 'user'] },
         { text: 'Transactions', icon: <History size={20} />, path: '/transactions', roles: ['super_admin', 'admin', 'user'] },
         { text: 'Customers', icon: <Contact size={20} />, path: '/customers', roles: ['super_admin', 'admin', 'user'] },

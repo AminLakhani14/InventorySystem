@@ -20,6 +20,7 @@ import notesRoutes from './routes/notesRoutes';
 import signupRequestRoutes from './routes/signupRequestRoutes';
 import customerRoutes from './routes/customerRoutes';
 import vendorRoutes from './routes/vendorRoutes';
+import vendorCommissionRoutes from './routes/vendorCommissionRoutes';
 import { errorHandler, notFound } from './middleware/errorHandler';
 import { ensureTenantIndexes } from './utils/tenantIndexes';
 
@@ -109,6 +110,7 @@ app.use('/api/transactions', transactionRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/vendors', vendorRoutes);
+app.use('/api/vendor-commissions', vendorCommissionRoutes);
 app.use('/api/credits', creditRoutes);
 app.use('/api/credit', creditRoutes);
 app.use('/api/installments', installmentRoutes);
