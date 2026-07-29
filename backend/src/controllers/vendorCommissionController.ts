@@ -46,6 +46,22 @@ interface SheetRow {
     isSaved: boolean;
 }
 
+// One physical sale of a vendor's vegetable — the detail report breaks the sheet down to these.
+interface SaleLine {
+    saleId: string;
+    time: Date;
+    vendorId: string;
+    vendorName: string;
+    productId: string;
+    productName: string;
+    quantity: number;
+    unitPrice: number;
+    totalPrice: number;
+    customerName: string;
+    paymentMethod: string;
+    soldByName: string;
+}
+
 const rowKey = (vendorId: string, productId: string) => `${vendorId}::${productId}`;
 
 export const getVendorCommissionSheet = async (req: AuthRequest, res: Response) => {
@@ -98,13 +114,34 @@ export const getVendorCommissionSheet = async (req: AuthRequest, res: Response) 
             });
         });
 
+        const saleLines: SaleLine[] = [];
+
         sales.forEach((sale) => {
             const vendorId = sale.vendorId?.toString();
             if (!vendorId || !vendorsById.has(vendorId)) return;
             const row = ensureRow(vendorId, sale.productId, sale.productName);
-            row.soldQuantity += Number(sale.amount) || 0;
-            row.salesValue += Number(sale.totalPrice) || 0;
+            const quantity = Number(sale.amount) || 0;
+            const totalPrice = Number(sale.totalPrice) || 0;
+            row.soldQuantity += quantity;
+            row.salesValue += totalPrice;
+            saleLines.push({
+                saleId: sale.id,
+                time: sale.timestamp,
+                vendorId,
+                vendorName: vendorsById.get(vendorId)?.name || 'Unknown vendor',
+                productId: sale.productId,
+                productName: sale.productName,
+                quantity,
+                // Older rows were written before unitPrice existed, so fall back to the line average.
+                unitPrice: Number(sale.unitPrice) || (quantity ? totalPrice / quantity : 0),
+                totalPrice,
+                customerName: sale.customerName || '',
+                paymentMethod: sale.paymentMethod || 'cash',
+                soldByName: sale.userName || '',
+            });
         });
+
+        saleLines.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
 
         // A saved commission must survive even if the underlying order was later edited away,
         // otherwise the amount the user typed silently disappears from the sheet.
@@ -152,6 +189,7 @@ export const getVendorCommissionSheet = async (req: AuthRequest, res: Response) 
         return res.json({
             date: sheetDate,
             rows: sheet,
+            sales: saleLines,
             totals: { ...totals, vendors: new Set(sheet.map((row) => row.vendorId)).size },
         });
     } catch (error: any) {
